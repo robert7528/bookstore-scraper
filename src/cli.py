@@ -124,5 +124,22 @@ def serve(host: str, port: int):
     uvicorn.run(app, host=host, port=port)
 
 
+@main.command()
+@click.argument("action", type=click.Choice(["install", "uninstall", "start", "stop", "status"]))
+def service(action: str):
+    """Manage system service (install/uninstall/start/stop/status).
+
+    \b
+    Examples:
+        python -m src.cli service install    # Register as system service
+        python -m src.cli service start      # Start the service
+        python -m src.cli service stop       # Stop the service
+        python -m src.cli service status     # Check service status
+        python -m src.cli service uninstall  # Remove the service
+    """
+    from .service import run_service_command
+    run_service_command(action)
+
+
 if __name__ == "__main__":
     main()
