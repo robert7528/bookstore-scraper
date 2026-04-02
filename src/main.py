@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 
 from .config.loader import list_sites
 from .models.schemas import ProxyRequest, ProxyResponse, SearchRequest, SearchResult
+from .scraper.engine import ScraperEngine, _is_challenged
 from .scraper.session_manager import SessionManager
 from .sites.runner import run_search
 
@@ -36,10 +37,13 @@ async def proxy_request(req: ProxyRequest):
 
     - 不帶 session_id：每次新建 session（無狀態）
     - 帶 session_id：復用同一 session，cookie 自動保持
+    - 碰到 Cloudflare challenge 自動 fallback 到 Playwright 瀏覽器
     """
+    from .scraper.base import Response as ScraperResponse
+
     t0 = time.perf_counter()
     sid = req.session_id or ""
-    own_session = not sid  # 沒帶 session_id 的話，用完即關
+    own_session = not sid
 
     if not sid:
         sid = uuid.uuid4().hex[:12]
@@ -55,6 +59,35 @@ async def proxy_request(req: ProxyRequest):
         else:
             return ProxyResponse(status_code=0, exception=f"Unsupported method: {method}")
 
+        # Check for Cloudflare challenge — fallback to browser
+        curl_resp = ScraperResponse(status_code=r.status_code, text=r.text, headers=dict(r.headers), url=str(r.url))
+        if _is_challenged(curl_resp):
+            logger.warning("Cloudflare challenge detected for %s, falling back to browser", req.url)
+            try:
+                from .scraper.browser_scraper import BrowserScraper
+                browser = BrowserScraper(timeout=req.timeout)
+                try:
+                    if method == "GET":
+                        browser_resp = await browser.get(req.url, headers=req.headers or None)
+                    else:
+                        browser_resp = await browser.post(req.url, headers=req.headers or None, data=req.body if req.body else None)
+
+                    if not _is_challenged(browser_resp):
+                        elapsed = time.perf_counter() - t0
+                        logger.info("%s %s → %d via Browser (%.2fs)", method, req.url, browser_resp.status_code, elapsed)
+                        return ProxyResponse(
+                            status_code=browser_resp.status_code,
+                            headers=browser_resp.headers,
+                            body=browser_resp.text,
+                            url=browser_resp.url,
+                            elapsed=round(elapsed, 3),
+                            session_id=sid if req.session_id else "",
+                        )
+                finally:
+                    await browser.close()
+            except ImportError:
+                logger.warning("Playwright not installed, cannot fallback to browser")
+
         elapsed = time.perf_counter() - t0
         logger.info("%s %s → %d (%.2fs) [session=%s]", method, req.url, r.status_code, elapsed, sid)
         return ProxyResponse(
@@ -67,7 +100,7 @@ async def proxy_request(req: ProxyRequest):
         )
     except Exception as e:
         elapsed = time.perf_counter() - t0
-        logger.error("%s %s → error: %s (%.2fs)", method, req.url, e, elapsed)
+        logger.error("%s %s → error: %s (%.2fs)", req.method, req.url, e, elapsed)
         return ProxyResponse(status_code=0, elapsed=round(elapsed, 3), exception=str(e))
     finally:
         if own_session:

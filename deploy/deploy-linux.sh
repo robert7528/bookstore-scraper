@@ -31,28 +31,48 @@ else
     info "Cloned: $APP_DIR"
 fi
 
-# --- [3/5] Install dependencies ---
+# --- [3/6] Install dependencies ---
 
 echo ""
-echo "=== [3/5] Install dependencies ==="
+echo "=== [3/6] Install dependencies ==="
 if [ ! -d "$APP_DIR/.venv" ]; then
     python3 -m venv .venv
     info "Created venv"
 fi
-.venv/bin/pip install -e . --quiet
+.venv/bin/pip install -e ".[browser]" --quiet
 info "Dependencies installed"
 
-# --- [4/5] Create directories ---
+# --- [4/6] Install Playwright browser ---
 
 echo ""
-echo "=== [4/5] Create directories ==="
+echo "=== [4/6] Install Playwright browser ==="
+# Install system dependencies for headless Chromium
+if command -v dnf >/dev/null 2>&1; then
+    dnf install -y alsa-lib atk at-spi2-atk cups-libs libdrm libXcomposite \
+        libXdamage libXrandr mesa-libgbm pango nss nspr \
+        libxkbcommon 2>/dev/null || true
+    info "System deps installed (dnf)"
+elif command -v apt-get >/dev/null 2>&1; then
+    apt-get install -y libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+        libdrm2 libgbm1 libpango-1.0-0 libnss3 libnspr4 \
+        libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 2>/dev/null || true
+    info "System deps installed (apt)"
+fi
+
+.venv/bin/python -m playwright install chromium
+info "Chromium browser installed"
+
+# --- [5/6] Create directories ---
+
+echo ""
+echo "=== [5/6] Create directories ==="
 mkdir -p "$LOG_DIR"
 info "$LOG_DIR"
 
-# --- [5/5] Install and start service ---
+# --- [6/6] Install and start service ---
 
 echo ""
-echo "=== [5/5] Install and start service ==="
+echo "=== [6/6] Install and start service ==="
 
 .venv/bin/python -m src.cli service stop 2>/dev/null || true
 .venv/bin/python -m src.cli service install
