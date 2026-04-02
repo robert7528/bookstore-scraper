@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 CHALLENGE_SIGNS = ["challenge-platform", "cf-browser-verification", "Just a moment", "cf_chl_opt"]
 WAF_SIGNS = ["您的連線暫時異常", "Connection is temporarily unavailable"]
 
-# If page has challenge markers BUT body is large, it's a real page with residual CF scripts
-CHALLENGE_MAX_BODY_SIZE = 150000
+# Real CF challenge pages are tiny (5-10KB). Real pages with residual CF scripts are much larger.
+CHALLENGE_MAX_BODY_SIZE = 15000
 
 
 def is_waf_blocked(resp: Response) -> bool:
