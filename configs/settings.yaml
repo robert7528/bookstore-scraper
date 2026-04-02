@@ -14,3 +14,9 @@ scraper:
 session:
   # Session 閒置自動過期時間 (秒)
   ttl: 300
+
+browser:
+  # 同時最多開幾個 tab（防止 CPU/RAM 暴漲）
+  max_tabs: 3
+  # 瀏覽器閒置多久自動關閉（秒）
+  idle_timeout: 300

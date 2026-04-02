@@ -40,8 +40,8 @@ class ScraperEngine:
             self._scrapers.append(CurlScraper())
             if self._use_browser:
                 try:
-                    from .browser_scraper import BrowserScraper
-                    self._scrapers.append(BrowserScraper())
+                    from .browser_pool import BrowserPool
+                    self._scrapers.append(BrowserPool())
                 except ImportError:
                     logger.warning("Playwright not installed, browser fallback disabled")
 

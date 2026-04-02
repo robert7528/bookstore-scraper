@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException
 
 from .config.loader import list_sites
 from .models.schemas import ProxyRequest, ProxyResponse, SearchRequest, SearchResult
-from .scraper.engine import ScraperEngine, _is_challenged
+from .scraper.engine import _is_challenged
 from .scraper.session_manager import SessionManager
 from .sites.runner import run_search
 
@@ -18,12 +18,26 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 session_mgr = SessionManager()
+_browser_pool = None
+
+
+def _get_browser_pool():
+    global _browser_pool
+    if _browser_pool is None:
+        try:
+            from .scraper.browser_pool import BrowserPool
+            _browser_pool = BrowserPool()
+        except ImportError:
+            pass
+    return _browser_pool
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
     await session_mgr.close_all()
+    if _browser_pool:
+        await _browser_pool.close()
 
 
 app = FastAPI(title="Bookstore Scraper", version="0.3.0", lifespan=lifespan)
@@ -39,7 +53,7 @@ async def proxy_request(req: ProxyRequest):
     - 帶 session_id：復用同一 session，cookie 自動保持
     - 碰到 Cloudflare challenge 自動 fallback 到 Playwright 瀏覽器
     """
-    from .scraper.base import Response as ScraperResponse
+    from .scraper.base import Response as ScraperResponse  # noqa: E402
 
     t0 = time.perf_counter()
     sid = req.session_id or ""
@@ -59,33 +73,29 @@ async def proxy_request(req: ProxyRequest):
         else:
             return ProxyResponse(status_code=0, exception=f"Unsupported method: {method}")
 
-        # Check for Cloudflare challenge — fallback to browser
+        # Check for Cloudflare challenge — fallback to browser pool
         curl_resp = ScraperResponse(status_code=r.status_code, text=r.text, headers=dict(r.headers), url=str(r.url))
         if _is_challenged(curl_resp):
             logger.warning("Cloudflare challenge detected for %s, falling back to browser", req.url)
-            try:
-                from .scraper.browser_scraper import BrowserScraper
-                browser = BrowserScraper(timeout=req.timeout)
-                try:
-                    if method == "GET":
-                        browser_resp = await browser.get(req.url, headers=req.headers or None)
-                    else:
-                        browser_resp = await browser.post(req.url, headers=req.headers or None, data=req.body if req.body else None)
+            pool = _get_browser_pool()
+            if pool:
+                if method == "GET":
+                    browser_resp = await pool.get(req.url, headers=req.headers or None)
+                else:
+                    browser_resp = await pool.post(req.url, headers=req.headers or None, data=req.body if req.body else None)
 
-                    if not _is_challenged(browser_resp):
-                        elapsed = time.perf_counter() - t0
-                        logger.info("%s %s → %d via Browser (%.2fs)", method, req.url, browser_resp.status_code, elapsed)
-                        return ProxyResponse(
-                            status_code=browser_resp.status_code,
-                            headers=browser_resp.headers,
-                            body=browser_resp.text,
-                            url=browser_resp.url,
-                            elapsed=round(elapsed, 3),
-                            session_id=sid if req.session_id else "",
-                        )
-                finally:
-                    await browser.close()
-            except ImportError:
+                if not _is_challenged(browser_resp):
+                    elapsed = time.perf_counter() - t0
+                    logger.info("%s %s → %d via BrowserPool (%.2fs)", method, req.url, browser_resp.status_code, elapsed)
+                    return ProxyResponse(
+                        status_code=browser_resp.status_code,
+                        headers=browser_resp.headers,
+                        body=browser_resp.text,
+                        url=browser_resp.url,
+                        elapsed=round(elapsed, 3),
+                        session_id=sid if req.session_id else "",
+                    )
+            else:
                 logger.warning("Playwright not installed, cannot fallback to browser")
 
         elapsed = time.perf_counter() - t0
