@@ -46,6 +46,7 @@ class BrowserPool(BaseScraper):
         self._last_used: float = 0
         self._lock = asyncio.Lock()
         self._idle_task: asyncio.Task | None = None
+        self._warm_pages: dict[str, any] = {}  # domain → page (reuse for CF session)
 
     async def _ensure_browser(self):
         async with self._lock:
@@ -93,6 +94,7 @@ class BrowserPool(BaseScraper):
 
     async def _shutdown_browser(self):
         async with self._lock:
+            self._warm_pages.clear()
             if self._context:
                 await self._context.close()
                 self._context = None
@@ -136,24 +138,42 @@ class BrowserPool(BaseScraper):
             return await self._context.cookies()
         return []
 
+    async def _get_warm_page(self, domain: str):
+        """Reuse a page that already passed CF challenge for this domain."""
+        if domain in self._warm_pages:
+            page = self._warm_pages[domain]
+            if not page.is_closed():
+                return page, False
+            del self._warm_pages[domain]
+        page = await self._context.new_page()
+        return page, True
+
     async def get(self, url: str, *, headers: dict | None = None, params: dict | None = None) -> Response:
         await self._ensure_browser()
+        from urllib.parse import urlparse
+        domain = urlparse(url).netloc
+
         async with self._semaphore:
-            page = await self._context.new_page()
-            if headers:
+            page, is_new = await self._get_warm_page(domain)
+            if headers and is_new:
                 await page.set_extra_http_headers(headers)
             try:
                 resp = await page.goto(url, wait_until="domcontentloaded", timeout=self._timeout)
                 await self._wait_for_challenge(page)
                 body = await page.content()
+                # Keep page alive for reuse (CF session stays valid)
+                self._warm_pages[domain] = page
                 return Response(
                     status_code=resp.status if resp else 0,
                     text=body,
                     headers={},
                     url=page.url,
                 )
-            finally:
+            except Exception:
                 await page.close()
+                self._warm_pages.pop(domain, None)
+                raise
+            finally:
                 self._last_used = time.time()
 
     async def post(self, url: str, *, headers: dict | None = None, data: dict | None = None, json: dict | None = None) -> Response:
