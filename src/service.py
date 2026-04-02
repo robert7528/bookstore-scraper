@@ -43,15 +43,15 @@ def _is_admin() -> bool:
 
 # ─── Linux (systemd) ────────────────────────────────────────────────────────
 
-SYSTEMD_UNIT = f"""\
+SYSTEMD_UNIT_TEMPLATE = """\
 [Unit]
-Description={DISPLAY_NAME}
+Description={display_name}
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory={{app_dir}}
-ExecStart=/usr/bin/xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" {{python}} -m src.cli serve
+WorkingDirectory={app_dir}
+ExecStart={exec_start}
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
@@ -63,15 +63,37 @@ WantedBy=multi-user.target
 SYSTEMD_PATH = f"/etc/systemd/system/{SERVICE_NAME}.service"
 
 
+def _build_exec_start(python: str) -> str:
+    """Build ExecStart command based on browser.headless setting in YAML."""
+    import shutil
+    try:
+        from .config.settings import get as cfg
+        headless = cfg("browser.headless", True)
+    except Exception:
+        headless = True
+
+    base_cmd = f"{python} -m src.cli serve"
+    if not headless and shutil.which("xvfb-run"):
+        return f'/usr/bin/xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" {base_cmd}'
+    return base_cmd
+
+
 def _linux_install():
     app_dir = _get_app_dir()
     python = _get_python()
-    unit = SYSTEMD_UNIT.format(app_dir=app_dir, python=python)
+    exec_start = _build_exec_start(python)
+    unit = SYSTEMD_UNIT_TEMPLATE.format(
+        display_name=DISPLAY_NAME, app_dir=app_dir, exec_start=exec_start,
+    )
     with open(SYSTEMD_PATH, "w") as f:
         f.write(unit)
     subprocess.run(["systemctl", "daemon-reload"], check=True)
     subprocess.run(["systemctl", "enable", SERVICE_NAME], check=True)
     print(f"Service installed: {SYSTEMD_PATH}")
+    if "xvfb-run" in exec_start:
+        print("  Xvfb enabled (browser.headless=false)")
+    else:
+        print("  Xvfb disabled (browser.headless=true)")
 
 
 def _linux_uninstall():
