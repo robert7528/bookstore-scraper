@@ -51,7 +51,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory={{app_dir}}
-ExecStart={{python}} -m src.cli serve
+ExecStart=/usr/bin/xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" {{python}} -m src.cli serve
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1

@@ -33,7 +33,7 @@ class BrowserPool(BaseScraper):
     - Auto-shutdown after idle timeout
     """
 
-    def __init__(self, *, headless: bool = True, timeout: int = 30,
+    def __init__(self, *, headless: bool = cfg("browser.headless", True), timeout: int = 30,
                  max_tabs: int = DEFAULT_MAX_TABS, idle_timeout: int = DEFAULT_IDLE_TIMEOUT):
         self._headless = headless
         self._timeout = timeout * 1000
