@@ -113,6 +113,106 @@ POST /request {"url": "https://www.books.com.tw/products/..."}
   → 自動 fallback 到 Browser Pool → 等待 challenge 解決 → 回傳（~2-4s）
 ```
 
+#### 呼叫範例
+
+**curl（Linux / macOS）**
+
+```bash
+# 搜尋頁（curl_cffi 直接過）
+curl -s -X POST http://localhost:8101/request \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://search.books.com.tw/search/query/key/python/cat/all","method":"GET"}'
+
+# 詳細頁（自動 fallback 到 Browser）
+curl -s -X POST http://localhost:8101/request \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://www.books.com.tw/products/0011043725","method":"GET"}'
+
+# POST 請求（帶 body）
+curl -s -X POST http://localhost:8101/request \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/api/search","method":"POST","body":"keyword=python&page=1"}'
+
+# 帶自訂 headers
+curl -s -X POST http://localhost:8101/request \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com","method":"GET","headers":{"Cookie":"session=abc123","Referer":"https://example.com"}}'
+
+# 有狀態請求（保持 Cookie，多步驟）
+curl -s -X POST http://localhost:8101/request \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/login","method":"POST","body":"user=xxx&pass=yyy","session_id":"mysite_user1"}'
+
+curl -s -X POST http://localhost:8101/request \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/search?q=test","method":"GET","session_id":"mysite_user1"}'
+```
+
+**PowerShell（Windows）**
+
+```powershell
+# 搜尋頁
+Invoke-RestMethod -Uri http://localhost:8101/request -Method POST `
+  -ContentType "application/json" `
+  -Body '{"url":"https://search.books.com.tw/search/query/key/python/cat/all","method":"GET"}'
+
+# 詳細頁
+Invoke-RestMethod -Uri http://localhost:8101/request -Method POST `
+  -ContentType "application/json" `
+  -Body '{"url":"https://www.books.com.tw/products/0011043725","method":"GET"}'
+```
+
+**Python**
+
+```python
+import requests
+
+# 搜尋頁
+resp = requests.post("http://localhost:8101/request", json={
+    "url": "https://search.books.com.tw/search/query/key/python/cat/all",
+    "method": "GET",
+})
+data = resp.json()
+print(data["status_code"], len(data["body"]), "bytes")
+
+# 詳細頁（自動 fallback）
+resp = requests.post("http://localhost:8101/request", json={
+    "url": "https://www.books.com.tw/products/0011043725",
+    "method": "GET",
+})
+data = resp.json()
+print(data["status_code"], len(data["body"]), "bytes")
+```
+
+**Go（HyFSE 整合）**
+
+```go
+// 見下方「Go 端整合範例」章節
+resp, err := PythonDriver(cfg, ProxyRequest{
+    URL:    "https://www.books.com.tw/products/0011043725",
+    Method: "GET",
+})
+```
+
+**監控 API**
+
+```bash
+# 目前資源狀態
+curl -s http://localhost:8101/monitor | python3 -m json.tool
+
+# 最近 10 筆請求的資源紀錄
+curl -s "http://localhost:8101/monitor/history?limit=10" | python3 -m json.tool
+
+# 查看活躍 Session
+curl -s http://localhost:8101/sessions | python3 -m json.tool
+
+# 手動關閉 Session
+curl -s -X DELETE http://localhost:8101/session/mysite_user1
+
+# 健康檢查
+curl -s http://localhost:8101/
+```
+
 ### 2. `GET /monitor` — 目前資源使用狀態
 
 ```json
