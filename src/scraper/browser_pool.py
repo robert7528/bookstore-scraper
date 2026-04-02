@@ -55,6 +55,7 @@ class BrowserPool(BaseScraper):
                     self._playwright = await async_playwright().start()
                 self._browser = await self._playwright.chromium.launch(
                     headless=self._headless,
+                    channel="chrome",
                     args=[
                         "--disable-blink-features=AutomationControlled",
                         "--disable-features=IsolateOrigins,site-per-process",
