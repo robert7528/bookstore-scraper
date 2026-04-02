@@ -131,14 +131,22 @@ class BrowserPool(BaseScraper):
 
         logger.info("Cloudflare challenge detected, waiting...")
         try:
+            # Try to click Turnstile checkbox if present
+            try:
+                turnstile = page.frame_locator("iframe[src*='challenges.cloudflare.com']")
+                checkbox = turnstile.locator("input[type='checkbox'], .cb-lb, #challenge-stage")
+                if await checkbox.count() > 0:
+                    await checkbox.first.click(timeout=3000)
+                    logger.info("Clicked Turnstile checkbox")
+                    await asyncio.sleep(2)
+            except Exception:
+                # No Turnstile iframe or click failed — continue waiting
+                pass
+
             # Wait for CF challenge to resolve and navigate to the real page.
-            # CF typically redirects after challenge is solved, so we wait for
-            # the title to change from "Just a moment..." to something else.
             await page.wait_for_function(
                 """() => {
-                    // Still on challenge page
                     if (document.title === 'Just a moment...') return false;
-                    // Challenge signs still present in small page
                     const html = document.documentElement.innerHTML;
                     const signs = ['challenge-platform', 'cf-browser-verification', 'cf_chl_opt'];
                     const hasSign = signs.some(s => html.includes(s));
@@ -147,7 +155,6 @@ class BrowserPool(BaseScraper):
                 }""",
                 timeout=CHALLENGE_TIMEOUT,
             )
-            # Wait a bit for page to fully load after redirect
             await page.wait_for_load_state("domcontentloaded", timeout=10000)
             logger.info("Challenge resolved, page title: %s", await page.title())
         except Exception as e:
