@@ -133,15 +133,27 @@ class BrowserPool(BaseScraper):
         try:
             # Try to click Turnstile checkbox if present
             try:
-                turnstile = page.frame_locator("iframe[src*='challenges.cloudflare.com']")
-                checkbox = turnstile.locator("input[type='checkbox'], .cb-lb, #challenge-stage")
-                if await checkbox.count() > 0:
-                    await checkbox.first.click(timeout=3000)
-                    logger.info("Clicked Turnstile checkbox")
-                    await asyncio.sleep(2)
-            except Exception:
-                # No Turnstile iframe or click failed — continue waiting
-                pass
+                # Wait for Turnstile iframe to appear
+                await asyncio.sleep(2)
+                # Find all iframes from Cloudflare challenges
+                for frame in page.frames:
+                    if "challenges.cloudflare.com" in (frame.url or ""):
+                        # Click the checkbox area inside the Turnstile iframe
+                        cb = frame.locator("body")
+                        if await cb.count() > 0:
+                            await cb.click(timeout=3000)
+                            logger.info("Clicked Turnstile checkbox in iframe: %s", frame.url[:80])
+                            await asyncio.sleep(3)
+                            break
+                else:
+                    # No iframe found — try clicking the widget area on the main page
+                    widget = page.locator("[id*='turnstile'], [class*='cf-turnstile']")
+                    if await widget.count() > 0:
+                        await widget.first.click(timeout=3000)
+                        logger.info("Clicked Turnstile widget on main page")
+                        await asyncio.sleep(3)
+            except Exception as ce:
+                logger.debug("Turnstile click attempt: %s", ce)
 
             # Wait for CF challenge to resolve and navigate to the real page.
             await page.wait_for_function(
