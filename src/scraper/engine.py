@@ -33,6 +33,15 @@ def _is_challenged(resp: Response) -> bool:
     # Non-200 with empty or tiny body — likely needs browser
     if resp.status_code != 200 and len(resp.text) < 1000:
         return True
+    return _is_challenged_content(resp)
+
+
+def _is_challenged_content(resp: Response) -> bool:
+    """Check response content only (ignore status code).
+
+    Used to validate browser fallback results where Playwright may report
+    the initial navigation status (e.g. 403) even after challenge is resolved.
+    """
     # CF challenge markers in small page
     has_signs = any(sign in resp.text for sign in CHALLENGE_SIGNS)
     if has_signs and len(resp.text) < CHALLENGE_MAX_BODY_SIZE:

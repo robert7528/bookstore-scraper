@@ -13,7 +13,7 @@ from .config.loader import list_sites
 from .models.schemas import ProxyRequest, ProxyResponse, SearchRequest, SearchResult
 from .monitor import RequestMetrics, get_current, get_history, record, snapshot
 from .rate_limiter import rate_limiter
-from .scraper.engine import _is_challenged
+from .scraper.engine import _is_challenged, _is_challenged_content
 from .scraper.session_manager import SessionManager
 from .sites.runner import run_search
 
@@ -93,7 +93,7 @@ async def proxy_request(req: ProxyRequest):
                 else:
                     browser_resp = await pool.post(req.url, headers=req.headers or None, data=req.body if req.body else None)
 
-                if not _is_challenged(browser_resp):
+                if not _is_challenged_content(browser_resp):
                     elapsed = time.perf_counter() - t0
                     after = snapshot()
                     record(RequestMetrics(
@@ -196,7 +196,7 @@ async def fetch_proxy(target_url: str, request: Request):
             if pool:
                 driver = "browser"
                 browser_resp = await pool.get(target_url)
-                if not _is_challenged(browser_resp):
+                if not _is_challenged_content(browser_resp):
                     elapsed = time.perf_counter() - t0
                     after = snapshot()
                     record(RequestMetrics(
