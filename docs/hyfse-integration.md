@@ -23,7 +23,7 @@ HyFSE (Go)
 
 | 項目 | 說明 |
 |---|---|
-| 預設 Port | 8000（可在 `configs/settings.yaml` 修改） |
+| 預設 Port | 8101（可在 `configs/settings.yaml` 修改） |
 | API 文件 | `http://{host}:{port}/docs`（Swagger UI） |
 | 健康檢查 | `GET http://{host}:{port}/` |
 
@@ -129,7 +129,7 @@ import (
 
 // PythonDriverConfig 設定
 type PythonDriverConfig struct {
-	BaseURL string // e.g. "http://localhost:8000"
+	BaseURL string // e.g. "http://localhost:8101"
 	Timeout int    // 預設 30
 }
 
@@ -194,7 +194,7 @@ func PythonDriver(cfg PythonDriverConfig, req ProxyRequest) (*ProxyResponse, err
 
 ```go
 cfg := PythonDriverConfig{
-    BaseURL: "http://localhost:8000",
+    BaseURL: "http://localhost:8101",
     Timeout: 30,
 }
 
@@ -317,7 +317,7 @@ python -m src.cli service restart
 ```yaml
 server:
   host: "0.0.0.0"
-  port: 8000            # 修改 port
+  port: 8101            # 修改 port
 
 scraper:
   impersonate: "chrome136"  # TLS 指紋版本
@@ -364,7 +364,7 @@ if resp.StatusCode == 200 && resp.Exception == "" {
 建議 HyFSE 啟動時檢查 Python Driver 是否可用：
 
 ```go
-resp, err := http.Get("http://localhost:8000/")
+resp, err := http.Get("http://localhost:8101/")
 if err != nil || resp.StatusCode != 200 {
     log.Warn("Python Driver not available, will use curl/selenium only")
 }
