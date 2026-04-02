@@ -7,51 +7,75 @@ from .curl_scraper import CurlScraper
 
 logger = logging.getLogger(__name__)
 
+CHALLENGE_SIGNS = ["challenge-platform", "cf-browser-verification", "Just a moment", "cf_chl_opt"]
+
+# If page has challenge markers BUT body is large, it's a real page with residual CF scripts
+CHALLENGE_MAX_BODY_SIZE = 150000
+
+
+def _is_challenged(resp: Response) -> bool:
+    """Detect Cloudflare challenge page.
+
+    A true challenge page is small (<150KB) and contains CF markers.
+    A real page loaded via browser may still contain residual CF script tags
+    but will be much larger — that's NOT a challenge.
+    """
+    if resp.status_code == 403:
+        return True
+    has_signs = any(sign in resp.text for sign in CHALLENGE_SIGNS)
+    if has_signs and len(resp.text) < CHALLENGE_MAX_BODY_SIZE:
+        return True
+    return False
+
 
 class ScraperEngine:
-    """Layered scraper engine — tries curl_cffi first, falls back to browser if needed."""
+    """Layered scraper engine — tries curl_cffi first, falls back to browser on challenge."""
 
-    def __init__(self):
+    def __init__(self, *, use_browser: bool = True):
+        self._use_browser = use_browser
         self._scrapers: list[BaseScraper] = []
 
     async def _ensure_scrapers(self):
         if not self._scrapers:
             self._scrapers.append(CurlScraper())
-            # Browser scraper added here in the future as fallback
+            if self._use_browser:
+                try:
+                    from .browser_scraper import BrowserScraper
+                    self._scrapers.append(BrowserScraper())
+                except ImportError:
+                    logger.warning("Playwright not installed, browser fallback disabled")
+
+    async def _request(self, method: str, url: str, **kwargs) -> Response:
+        await self._ensure_scrapers()
+        last_error: Exception | None = None
+
+        for scraper in self._scrapers:
+            try:
+                func = scraper.get if method == "GET" else scraper.post
+                resp = await func(url, **kwargs)
+
+                if _is_challenged(resp):
+                    logger.warning(
+                        "%s got Cloudflare challenge for %s, trying next scraper",
+                        type(scraper).__name__, url,
+                    )
+                    last_error = Exception(f"Cloudflare challenge from {url}")
+                    continue
+
+                logger.info("%s %s → %d via %s", method, url, resp.status_code, type(scraper).__name__)
+                return resp
+            except Exception as e:
+                logger.warning("%s failed: %s", type(scraper).__name__, e)
+                last_error = e
+                continue
+
+        raise last_error or Exception("No scrapers available")
 
     async def get(self, url: str, **kwargs) -> Response:
-        await self._ensure_scrapers()
-        last_error: Exception | None = None
-        for scraper in self._scrapers:
-            try:
-                resp = await scraper.get(url, **kwargs)
-                if resp.status_code == 403:
-                    logger.warning("%s returned 403, trying next scraper", type(scraper).__name__)
-                    last_error = Exception(f"403 from {url}")
-                    continue
-                return resp
-            except Exception as e:
-                logger.warning("%s failed: %s", type(scraper).__name__, e)
-                last_error = e
-                continue
-        raise last_error or Exception("No scrapers available")
+        return await self._request("GET", url, **kwargs)
 
     async def post(self, url: str, **kwargs) -> Response:
-        await self._ensure_scrapers()
-        last_error: Exception | None = None
-        for scraper in self._scrapers:
-            try:
-                resp = await scraper.post(url, **kwargs)
-                if resp.status_code == 403:
-                    logger.warning("%s returned 403, trying next scraper", type(scraper).__name__)
-                    last_error = Exception(f"403 from {url}")
-                    continue
-                return resp
-            except Exception as e:
-                logger.warning("%s failed: %s", type(scraper).__name__, e)
-                last_error = e
-                continue
-        raise last_error or Exception("No scrapers available")
+        return await self._request("POST", url, **kwargs)
 
     async def close(self):
         for s in self._scrapers:
