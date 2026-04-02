@@ -35,6 +35,12 @@ def _get_browser_pool():
     return _browser_pool
 
 
+# Domains where curl was challenged and browser had to solve it.
+# CF ties cf_clearance to TLS fingerprint, so curl can't reuse browser cookies.
+# For these domains, skip curl and go directly to browser.
+_browser_only_domains: set[str] = set()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
@@ -186,52 +192,56 @@ async def fetch_proxy(target_url: str, request: Request):
     session = session_mgr.get_or_create(sid)
 
     try:
-        r = await session.get(target_url)
+        # If this domain previously needed browser, skip curl entirely
+        use_browser = domain in _browser_only_domains
+        pool = _get_browser_pool()
 
-        # Check challenge and fallback
-        curl_resp = ScraperResponse(status_code=r.status_code, text=r.text, headers=dict(r.headers), url=str(r.url))
-        if _is_challenged(curl_resp):
+        if not use_browser:
+            r = await session.get(target_url)
+            curl_resp = ScraperResponse(status_code=r.status_code, text=r.text, headers=dict(r.headers), url=str(r.url))
+            if not _is_challenged(curl_resp):
+                elapsed = time.perf_counter() - t0
+                after = snapshot()
+                record(RequestMetrics(
+                    url=target_url, method="GET", driver=driver,
+                    status_code=r.status_code, elapsed=elapsed,
+                    before=before, after=after,
+                ))
+                logger.info("FETCH %s → %d via curl (%.2fs)", target_url, r.status_code, elapsed)
+                return HTMLResponse(content=r.text, status_code=r.status_code)
+
             logger.warning("Fetch proxy: challenge detected for %s, using browser", target_url)
-            pool = _get_browser_pool()
-            if pool:
-                driver = "browser"
-                browser_resp = await pool.get(target_url)
-                if not _is_challenged_content(browser_resp):
-                    # Sync browser cookies (e.g. cf_clearance) back to curl session
-                    try:
-                        browser_cookies = await pool.get_cookies()
-                        for c in browser_cookies:
-                            session.cookies.set(c["name"], c["value"], domain=c.get("domain", ""))
-                        if browser_cookies:
-                            logger.info("Synced %d browser cookies to curl session %s", len(browser_cookies), sid)
-                    except Exception as e:
-                        logger.warning("Failed to sync browser cookies: %s", e)
 
-                    elapsed = time.perf_counter() - t0
-                    after = snapshot()
-                    record(RequestMetrics(
-                        url=target_url, method="GET", driver=driver,
-                        status_code=browser_resp.status_code, elapsed=elapsed,
-                        before=before, after=after,
-                    ))
-                    logger.info("FETCH %s → %d via Browser (%.2fs)", target_url, browser_resp.status_code, elapsed)
-                    return HTMLResponse(
-                        content=browser_resp.text,
-                        status_code=browser_resp.status_code,
-                    )
+        # Browser fallback (or direct browser for known challenged domains)
+        if pool:
+            if use_browser:
+                logger.info("Fetch proxy: using browser directly for %s (known challenged domain)", domain)
+            driver = "browser"
+            browser_resp = await pool.get(target_url)
+            if not _is_challenged_content(browser_resp):
+                _browser_only_domains.add(domain)
+                elapsed = time.perf_counter() - t0
+                after = snapshot()
+                record(RequestMetrics(
+                    url=target_url, method="GET", driver=driver,
+                    status_code=browser_resp.status_code, elapsed=elapsed,
+                    before=before, after=after,
+                ))
+                logger.info("FETCH %s → %d via Browser (%.2fs)", target_url, browser_resp.status_code, elapsed)
+                return HTMLResponse(content=browser_resp.text, status_code=browser_resp.status_code)
 
+        # Fallback: return whatever we have
         elapsed = time.perf_counter() - t0
         after = snapshot()
+        status = r.status_code if not use_browser else 502
+        text = r.text if not use_browser else "Browser fallback failed"
         record(RequestMetrics(
             url=target_url, method="GET", driver=driver,
-            status_code=r.status_code, elapsed=elapsed,
+            status_code=status, elapsed=elapsed,
             before=before, after=after,
         ))
-        logger.info("FETCH %s → %d via curl (%.2fs)", target_url, r.status_code, elapsed)
-        return HTMLResponse(
-            content=r.text,
-            status_code=r.status_code,
-        )
+        logger.warning("FETCH %s → %d (all methods failed, %.2fs)", target_url, status, elapsed)
+        return HTMLResponse(content=text, status_code=status)
     except Exception as e:
         elapsed = time.perf_counter() - t0
         logger.error("FETCH %s → error: %s (%.2fs)", target_url, e, elapsed)
