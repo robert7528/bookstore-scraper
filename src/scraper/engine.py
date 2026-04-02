@@ -43,7 +43,11 @@ def _is_challenged_content(resp: Response) -> bool:
     Used to validate browser fallback results where Playwright may report
     the initial navigation status (e.g. 403) even after challenge is resolved.
     """
-    # CF challenge markers in small page
+    text = resp.text[:5000]  # Only check beginning of page
+    # Definitive challenge: title says "Just a moment..."
+    if "<title>Just a moment...</title>" in text:
+        return True
+    # CF challenge markers in small page (old-style challenge pages < 15KB)
     has_signs = any(sign in resp.text for sign in CHALLENGE_SIGNS)
     if has_signs and len(resp.text) < CHALLENGE_MAX_BODY_SIZE:
         return True
