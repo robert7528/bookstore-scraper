@@ -6,7 +6,8 @@ import uuid
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
 
 from .config.loader import list_sites
 from .models.schemas import ProxyRequest, ProxyResponse, SearchRequest, SearchResult
@@ -137,6 +138,80 @@ async def proxy_request(req: ProxyRequest):
     finally:
         if own_session:
             await session_mgr.close(sid)
+
+
+# --- Fetch proxy endpoint (for HyFSE config-only integration) ---
+
+@app.get("/fetch/{target_url:path}")
+async def fetch_proxy(target_url: str, request: Request):
+    """透明代理 — HyFSE 設定檔只需改 URL 即可使用，回傳 raw HTML。
+
+    HyFSE 設定範例:
+        原本: "target": "https://www.books.com.tw/products/##searchkey##"
+        改成: "target": "http://localhost:8101/fetch/https://www.books.com.tw/products/##searchkey##"
+
+    HyFSE 的 driver 維持 curl，parser 不用改。
+    """
+    from .scraper.base import Response as ScraperResponse
+
+    t0 = time.perf_counter()
+    before = snapshot()
+    driver = "curl"
+
+    # Reconstruct query string if any
+    if request.url.query:
+        target_url = f"{target_url}?{request.url.query}"
+
+    # Ensure URL has protocol
+    if not target_url.startswith("http"):
+        target_url = "https://" + target_url
+
+    sid = f"fetch_{uuid.uuid4().hex[:8]}"
+    session = session_mgr.get_or_create(sid)
+
+    try:
+        r = await session.get(target_url)
+
+        # Check challenge and fallback
+        curl_resp = ScraperResponse(status_code=r.status_code, text=r.text, headers=dict(r.headers), url=str(r.url))
+        if _is_challenged(curl_resp):
+            logger.warning("Fetch proxy: challenge detected for %s, using browser", target_url)
+            pool = _get_browser_pool()
+            if pool:
+                driver = "browser"
+                browser_resp = await pool.get(target_url)
+                if not _is_challenged(browser_resp):
+                    elapsed = time.perf_counter() - t0
+                    after = snapshot()
+                    record(RequestMetrics(
+                        url=target_url, method="GET", driver=driver,
+                        status_code=browser_resp.status_code, elapsed=elapsed,
+                        before=before, after=after,
+                    ))
+                    logger.info("FETCH %s → %d via Browser (%.2fs)", target_url, browser_resp.status_code, elapsed)
+                    return HTMLResponse(
+                        content=browser_resp.text,
+                        status_code=browser_resp.status_code,
+                    )
+
+        elapsed = time.perf_counter() - t0
+        after = snapshot()
+        record(RequestMetrics(
+            url=target_url, method="GET", driver=driver,
+            status_code=r.status_code, elapsed=elapsed,
+            before=before, after=after,
+        ))
+        logger.info("FETCH %s → %d via curl (%.2fs)", target_url, r.status_code, elapsed)
+        return HTMLResponse(
+            content=r.text,
+            status_code=r.status_code,
+        )
+    except Exception as e:
+        elapsed = time.perf_counter() - t0
+        logger.error("FETCH %s → error: %s (%.2fs)", target_url, e, elapsed)
+        raise HTTPException(status_code=502, detail=str(e))
+    finally:
+        await session_mgr.close(sid)
 
 
 # --- Monitor endpoints ---
