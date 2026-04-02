@@ -152,6 +152,15 @@ class BrowserPool(BaseScraper):
             logger.info("Challenge resolved, page title: %s", await page.title())
         except Exception as e:
             logger.warning("Challenge wait timed out: %s", e)
+            # Save debug screenshot
+            try:
+                from pathlib import Path
+                debug_dir = Path(cfg("server.debug_dir", "/tmp"))
+                screenshot_path = debug_dir / "challenge_debug.png"
+                await page.screenshot(path=str(screenshot_path))
+                logger.info("Debug screenshot saved: %s", screenshot_path)
+            except Exception as se:
+                logger.warning("Failed to save debug screenshot: %s", se)
 
     async def get_cookies(self) -> list[dict]:
         """Get all cookies from the browser context."""
