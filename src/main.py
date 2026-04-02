@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse
 from .config.loader import list_sites
 from .models.schemas import ProxyRequest, ProxyResponse, SearchRequest, SearchResult
 from .monitor import RequestMetrics, get_current, get_history, record, snapshot
+from .rate_limiter import rate_limiter
 from .scraper.engine import _is_challenged
 from .scraper.session_manager import SessionManager
 from .sites.runner import run_search
@@ -62,6 +63,9 @@ async def proxy_request(req: ProxyRequest):
     sid = req.session_id or ""
     own_session = not sid
     driver = "curl"
+
+    # Rate limit per domain
+    await rate_limiter.wait(req.url)
 
     if not sid:
         sid = uuid.uuid4().hex[:12]
@@ -170,6 +174,11 @@ async def fetch_proxy(target_url: str, request: Request):
     # Ensure URL has protocol
     if not target_url.startswith("http"):
         target_url = "https://" + target_url
+
+    # Rate limit per domain to avoid WAF blocking
+    wait_time = await rate_limiter.wait(target_url)
+    if wait_time > 0:
+        logger.info("Rate limited %.2fs for %s", wait_time, target_url[:80])
 
     sid = f"fetch_{uuid.uuid4().hex[:8]}"
     session = session_mgr.get_or_create(sid)

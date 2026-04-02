@@ -10,6 +10,8 @@ scraper:
   impersonate: "chrome136"
   # 預設請求逾時 (秒)
   timeout: 30
+  # 同一 domain 最小請求間隔（秒），防止被 WAF rate limit
+  rate_limit_interval: 1.0
 
 session:
   # Session 閒置自動過期時間 (秒)
