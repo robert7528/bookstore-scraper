@@ -23,16 +23,17 @@ def _is_challenged(resp: Response) -> bool:
     """Detect responses that need browser fallback.
 
     Triggers on:
-    - HTTP 403 (blocked)
-    - HTTP 4xx/5xx with empty body (e.g. 484 from 博客來)
+    - HTTP 403/4xx/5xx with challenge content or empty body
     - Cloudflare challenge markers in small pages
     - WAF rate-limit error pages
+
+    Does NOT trigger if status is non-200 but body has real page content
+    (CF sometimes returns 403 with valid page after cookie validation).
     """
-    if resp.status_code == 403:
-        return True
-    # Non-200 with empty or tiny body — likely needs browser
+    # Non-200 with empty or tiny body — likely blocked
     if resp.status_code != 200 and len(resp.text) < 1000:
         return True
+    # Always check content regardless of status code
     return _is_challenged_content(resp)
 
 
