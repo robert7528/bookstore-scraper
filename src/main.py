@@ -158,6 +158,11 @@ async def fetch_proxy(target_url: str, request: Request):
     before = snapshot()
     driver = "curl"
 
+    # Extract raw URL from request path to preserve original encoding (e.g. %E4%B8%AD)
+    # FastAPI auto-decodes path params, which breaks URL-encoded search terms
+    raw_path = request.url.path
+    target_url = raw_path.split("/fetch/", 1)[1] if "/fetch/" in raw_path else target_url
+
     # Reconstruct query string if any
     if request.url.query:
         target_url = f"{target_url}?{request.url.query}"
