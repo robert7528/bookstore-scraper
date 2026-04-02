@@ -5,9 +5,8 @@ server:
   port: 8101
 
 scraper:
-  # 預設 TLS 指紋偽造的瀏覽器版本
-  # 可選: chrome116, chrome120, chrome123, chrome124, chrome131, chrome136 等
-  impersonate: "chrome136"
+  # TLS 指紋偽造的瀏覽器版本: "auto" (自動偵測系統 Chrome 版本), 或指定如 "chrome136"
+  impersonate: "auto"
   # 預設請求逾時 (秒)
   timeout: 30
   # 同一 domain 最小請求間隔（秒），防止被 WAF rate limit

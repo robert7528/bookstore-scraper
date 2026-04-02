@@ -9,7 +9,26 @@ from .base import BaseScraper, Response
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_IMPERSONATE = cfg("scraper.impersonate", "chrome136")
+def _detect_impersonate() -> str:
+    """Auto-detect impersonate version from system Chrome, fallback to config."""
+    configured = cfg("scraper.impersonate", "auto")
+    if configured != "auto":
+        return configured
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["google-chrome", "--version"], capture_output=True, text=True, timeout=5
+        )
+        version = int(result.stdout.strip().split()[-1].split(".")[0])
+        imp = f"chrome{version}"
+        logger.info("Auto-detected impersonate: %s", imp)
+        return imp
+    except Exception:
+        logger.info("Chrome not found, using default impersonate: chrome136")
+        return "chrome136"
+
+
+DEFAULT_IMPERSONATE = _detect_impersonate()
 DEFAULT_TIMEOUT = cfg("scraper.timeout", 30)
 
 
