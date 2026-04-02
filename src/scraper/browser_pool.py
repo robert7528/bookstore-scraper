@@ -52,11 +52,26 @@ class BrowserPool(BaseScraper):
             if self._browser is None or not self._browser.is_connected():
                 if self._playwright is None:
                     self._playwright = await async_playwright().start()
-                self._browser = await self._playwright.chromium.launch(headless=self._headless)
+                self._browser = await self._playwright.chromium.launch(
+                    headless=self._headless,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--disable-features=IsolateOrigins,site-per-process",
+                        "--no-first-run",
+                        "--no-default-browser-check",
+                    ],
+                )
                 self._context = await self._browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
                     viewport={"width": 1920, "height": 1080},
                 )
+                # Hide webdriver property to avoid headless detection
+                await self._context.add_init_script("""
+                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                    Object.defineProperty(navigator, 'languages', {get: () => ['zh-TW', 'zh', 'en-US', 'en']});
+                    window.chrome = {runtime: {}};
+                """)
                 logger.info("Browser pool started (headless=%s, max_tabs=%d)", self._headless, self._max_tabs)
                 self._start_idle_watcher()
 
@@ -93,26 +108,27 @@ class BrowserPool(BaseScraper):
 
         logger.info("Cloudflare challenge detected, waiting...")
         try:
-            # Wait for real page content to appear instead of checking if CF script is gone
-            # (CF script may remain in page even after challenge is resolved)
+            # Wait for CF challenge to resolve and navigate to the real page.
+            # CF typically redirects after challenge is solved, so we wait for
+            # the title to change from "Just a moment..." to something else.
             await page.wait_for_function(
                 """() => {
-                    const body = document.querySelector('body');
-                    if (!body) return false;
-                    const text = body.innerText || '';
-                    // Real page loaded: significant text content
-                    if (text.length > 2000) return true;
-                    // Check for common page elements that indicate real content
-                    if (document.querySelector('h1') && document.querySelector('h1').innerText.length > 0) return true;
-                    if (document.querySelector('.type02_p003')) return true;
-                    if (document.querySelector('.table-searchlist')) return true;
-                    return false;
+                    // Still on challenge page
+                    if (document.title === 'Just a moment...') return false;
+                    // Challenge signs still present in small page
+                    const html = document.documentElement.innerHTML;
+                    const signs = ['challenge-platform', 'cf-browser-verification', 'cf_chl_opt'];
+                    const hasSign = signs.some(s => html.includes(s));
+                    if (hasSign && html.length < 150000) return false;
+                    return true;
                 }""",
                 timeout=CHALLENGE_TIMEOUT,
             )
-            logger.info("Challenge resolved")
-        except Exception:
-            logger.warning("Challenge wait timed out, proceeding anyway")
+            # Wait a bit for page to fully load after redirect
+            await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            logger.info("Challenge resolved, page title: %s", await page.title())
+        except Exception as e:
+            logger.warning("Challenge wait timed out: %s", e)
 
     async def get(self, url: str, *, headers: dict | None = None, params: dict | None = None) -> Response:
         await self._ensure_browser()
