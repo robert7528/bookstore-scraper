@@ -432,9 +432,107 @@ resp2, _ := PythonDriver(cfg, ProxyRequest{
 
 ---
 
-## HyFSE 設定檔範例
+## HyFSE 整合方式
 
-在 HyFSE 的設定檔中，將 `driver` 改為 `python` 即可使用本服務：
+有兩種整合方式，依 HyFSE 是否修改程式碼而定：
+
+### 方式一：只改設定檔（推薦，不需改 HyFSE 程式碼）
+
+使用 `GET /fetch/{url}` 透明代理，只需把設定檔的 `target` URL 前面加上 `http://{host}:{port}/fetch/`。
+
+HyFSE 的 driver 維持 `curl`，parser 不用改，**HyFSE 完全不知道中間有代理**。
+
+**博客來詳細頁範例：**
+
+```json
+{
+    "search": {
+        "driver": "curl",
+        "steps": [
+            {
+                "command": "open",
+                "target": "http://10.30.0.73:8101/fetch/https://www.books.com.tw/products/##searchkey##",
+                "value": "",
+                "options": {}
+            }
+        ]
+    }
+}
+```
+
+**對照原本的設定（會被 Cloudflare 擋）：**
+
+```json
+{
+    "search": {
+        "driver": "curl",
+        "steps": [
+            {
+                "command": "open",
+                "target": "https://www.books.com.tw/products/##searchkey##",
+                "value": "",
+                "options": {}
+            }
+        ]
+    }
+}
+```
+
+**改動只有一行：在 `target` 的 URL 前面加上 `http://10.30.0.73:8101/fetch/`**
+
+**運作原理：**
+
+```
+HyFSE (driver: curl)
+  → Go curl GET http://10.30.0.73:8101/fetch/https://www.books.com.tw/products/xxx
+  → bookstore-scraper 收到請求
+  → curl_cffi 嘗試抓 https://www.books.com.tw/products/xxx
+  → 如果被 Cloudflare 擋 → 自動 fallback 到 Browser Pool
+  → 回傳 raw HTML（不是 JSON）
+  → HyFSE goquery parser 正常解析
+```
+
+**更多設定檔範例：**
+
+```json
+// 簡易查詢 — 搜尋頁（curl_cffi 直接過，不需要瀏覽器）
+{
+    "command": "open",
+    "target": "http://10.30.0.73:8101/fetch/https://search.books.com.tw/search/query/key/##searchkey##/cat/all",
+    "value": "",
+    "options": {}
+}
+
+// 進階查詢 — 帶欄位參數
+{
+    "command": "open",
+    "target": "http://10.30.0.73:8101/fetch/https://search.books.com.tw/search/query/key/##key1##/cat/all",
+    "value": "",
+    "options": {}
+}
+
+// 翻頁（nextsteps）
+{
+    "command": "open",
+    "target": "http://10.30.0.73:8101/fetch/https://search.books.com.tw/search/query/key/##searchkey##/cat/all/page/##page##",
+    "value": "",
+    "options": {}
+}
+```
+
+**呼叫測試：**
+
+```bash
+# 搜尋頁（curl_cffi 直接過）
+curl -s http://10.30.0.73:8101/fetch/https://search.books.com.tw/search/query/key/python/cat/all | head -20
+
+# 詳細頁（自動 fallback 到 Browser）
+curl -s http://10.30.0.73:8101/fetch/https://www.books.com.tw/products/0011043725 | head -20
+```
+
+### 方式二：修改 HyFSE 程式碼（新增 python driver）
+
+在 HyFSE Go 端新增 `driver: "python"`，呼叫 `POST /request` API，回傳 JSON 格式。
 
 ```json
 {
@@ -443,7 +541,7 @@ resp2, _ := PythonDriver(cfg, ProxyRequest{
         "steps": [
             {
                 "command": "open",
-                "target": "https://search.books.com.tw/search/query/key/##searchkey##/cat/all",
+                "target": "https://www.books.com.tw/products/##searchkey##",
                 "value": "",
                 "options": {}
             }
@@ -456,8 +554,19 @@ HyFSE Go 端在 `driver == "python"` 時：
 
 1. 照常進行參數編碼、欄位映射、條件組裝
 2. 將組好的完整 URL 透過 `POST /request` 發送
-3. 將回傳的 `body` 交給 parser 處理（goquery / json / jsonp）
+3. 從回傳 JSON 的 `body` 欄位取出 HTML，交給 parser 處理
 4. 其餘流程（解析、輸出）不變
+
+### 兩種方式比較
+
+| | 方式一：只改設定檔 | 方式二：改 HyFSE 程式碼 |
+|---|---|---|
+| HyFSE 修改 | 設定檔的 target URL | Go 程式碼 + 設定檔 |
+| 回傳格式 | raw HTML | JSON（含 headers、status 等） |
+| Session 支援 | 不支援（每次獨立） | 支援（session_id） |
+| POST 請求 | 不支援（只有 GET） | 支援 |
+| 適合場景 | 大多數查詢/詳細頁 | 需要登入、POST、Cookie 保持的站 |
+| 部署門檻 | **最低** | 需要改 Go 程式碼 |
 
 ---
 
