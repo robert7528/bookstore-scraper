@@ -16,7 +16,7 @@ from .base import BaseScraper, Response
 
 logger = logging.getLogger(__name__)
 
-CHALLENGE_TIMEOUT = 8000
+CHALLENGE_TIMEOUT = cfg("browser.challenge_timeout", 8) * 1000  # ms
 CHALLENGE_SIGNS = ["challenge-platform", "cf-browser-verification", "Just a moment"]
 
 # Defaults (overridable via configs/settings.yaml)
