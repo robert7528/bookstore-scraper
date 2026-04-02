@@ -31,48 +31,65 @@ else
     info "Cloned: $APP_DIR"
 fi
 
-# --- [3/6] Install dependencies ---
+# --- [3/7] Install dependencies ---
 
 echo ""
-echo "=== [3/6] Install dependencies ==="
+echo "=== [3/7] Install dependencies ==="
 if [ ! -d "$APP_DIR/.venv" ]; then
     python3 -m venv .venv
     info "Created venv"
 fi
-.venv/bin/pip install -e ".[browser]" --quiet
+.venv/bin/pip install -e ".[browser,undetected]" --quiet
 info "Dependencies installed"
 
-# --- [4/6] Install Playwright browser ---
+# --- [4/7] Install Google Chrome + Xvfb ---
 
 echo ""
-echo "=== [4/6] Install Playwright browser ==="
-# Install system dependencies for headless Chromium
-if command -v dnf >/dev/null 2>&1; then
-    dnf install -y alsa-lib atk at-spi2-atk cups-libs libdrm libXcomposite \
-        libXdamage libXrandr mesa-libgbm pango nss nspr \
-        libxkbcommon 2>/dev/null || true
-    info "System deps installed (dnf)"
-elif command -v apt-get >/dev/null 2>&1; then
-    apt-get install -y libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
-        libdrm2 libgbm1 libpango-1.0-0 libnss3 libnspr4 \
-        libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 2>/dev/null || true
-    info "System deps installed (apt)"
+echo "=== [4/7] Install Google Chrome + Xvfb ==="
+if ! command -v google-chrome >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+        wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+        apt-get install -y /tmp/chrome.deb 2>/dev/null || true
+        rm -f /tmp/chrome.deb
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y https://dl.google.com/linux/direct/google-chrome-stable_current_x86_64.rpm 2>/dev/null || true
+    fi
+fi
+if command -v google-chrome >/dev/null 2>&1; then
+    info "Google Chrome: $(google-chrome --version)"
+else
+    info "WARNING: Google Chrome not installed (browser fallback may not work)"
 fi
 
-.venv/bin/python -m playwright install chromium
-info "Chromium browser installed"
+# Install Xvfb for non-headless browser mode
+if command -v apt-get >/dev/null 2>&1; then
+    apt-get install -y xvfb 2>/dev/null || true
+elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y xorg-x11-server-Xvfb 2>/dev/null || true
+fi
+if command -v xvfb-run >/dev/null 2>&1; then
+    info "Xvfb installed"
+else
+    info "WARNING: Xvfb not installed (headless: false requires Xvfb)"
+fi
 
-# --- [5/6] Create directories ---
+# --- [5/7] Install Playwright browser (optional fallback) ---
 
 echo ""
-echo "=== [5/6] Create directories ==="
+echo "=== [5/7] Install Playwright browser (optional) ==="
+.venv/bin/python -m playwright install chromium 2>/dev/null || info "Playwright chromium skipped"
+
+# --- [6/7] Create directories ---
+
+echo ""
+echo "=== [6/7] Create directories ==="
 mkdir -p "$LOG_DIR"
 info "$LOG_DIR"
 
-# --- [6/6] Install and start service ---
+# --- [7/7] Install and start service ---
 
 echo ""
-echo "=== [6/6] Install and start service ==="
+echo "=== [7/7] Install and start service ==="
 
 .venv/bin/python -m src.cli service stop 2>/dev/null || true
 .venv/bin/python -m src.cli service install
