@@ -20,16 +20,25 @@ def is_waf_blocked(resp: Response) -> bool:
 
 
 def _is_challenged(resp: Response) -> bool:
-    """Detect Cloudflare challenge page.
+    """Detect responses that need browser fallback.
 
-    A true challenge page is small (<150KB) and contains CF markers.
-    A real page loaded via browser may still contain residual CF script tags
-    but will be much larger — that's NOT a challenge.
+    Triggers on:
+    - HTTP 403 (blocked)
+    - HTTP 4xx/5xx with empty body (e.g. 484 from 博客來)
+    - Cloudflare challenge markers in small pages
+    - WAF rate-limit error pages
     """
     if resp.status_code == 403:
         return True
+    # Non-200 with empty or tiny body — likely needs browser
+    if resp.status_code != 200 and len(resp.text) < 1000:
+        return True
+    # CF challenge markers in small page
     has_signs = any(sign in resp.text for sign in CHALLENGE_SIGNS)
     if has_signs and len(resp.text) < CHALLENGE_MAX_BODY_SIZE:
+        return True
+    # WAF rate-limit page
+    if is_waf_blocked(resp):
         return True
     return False
 
