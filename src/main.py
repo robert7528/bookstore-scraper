@@ -180,7 +180,9 @@ async def fetch_proxy(target_url: str, request: Request):
     if wait_time > 0:
         logger.info("Rate limited %.2fs for %s", wait_time, target_url[:80])
 
-    sid = f"fetch_{uuid.uuid4().hex[:8]}"
+    from urllib.parse import urlparse
+    domain = urlparse(target_url).netloc or "unknown"
+    sid = f"fetch_{domain}"
     session = session_mgr.get_or_create(sid)
 
     try:
@@ -224,8 +226,10 @@ async def fetch_proxy(target_url: str, request: Request):
         elapsed = time.perf_counter() - t0
         logger.error("FETCH %s → error: %s (%.2fs)", target_url, e, elapsed)
         raise HTTPException(status_code=502, detail=str(e))
-    finally:
+    except Exception:
+        # Close session on error so next request gets a fresh one
         await session_mgr.close(sid)
+        raise
 
 
 # --- Monitor endpoints ---
