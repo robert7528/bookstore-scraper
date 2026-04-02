@@ -1,0 +1,16 @@
+# bookstore-scraper 服務設定
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+scraper:
+  # 預設 TLS 指紋偽造的瀏覽器版本
+  # 可選: chrome116, chrome120, chrome123, chrome124, chrome131, chrome136 等
+  impersonate: "chrome136"
+  # 預設請求逾時 (秒)
+  timeout: 30
+
+session:
+  # Session 閒置自動過期時間 (秒)
+  ttl: 300

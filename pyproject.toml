@@ -1,0 +1,21 @@
+[project]
+name = "bookstore-scraper"
+version = "0.1.0"
+description = "Anti-bot web scraper for protected bookstore/database sites"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "curl-cffi>=0.7",
+    "pyyaml>=6",
+    "pydantic>=2",
+    "selectolax>=0.3",
+    "click>=8",
+]
+
+[project.optional-dependencies]
+browser = ["playwright>=1.49"]
+dev = ["pytest>=8", "httpx>=0.28"]
+
+[project.scripts]
+scraper = "src.cli:main"

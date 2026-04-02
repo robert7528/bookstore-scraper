@@ -1,0 +1,45 @@
+# 博客來搜尋設定
+name: 博客來
+base_url: https://search.books.com.tw
+
+search:
+  # 使用 list view (v=0) 取得完整資訊
+  url: "https://search.books.com.tw/search/query/key/{keyword}/cat/all/v/0/page/{page}"
+  method: GET
+  encoding: utf-8
+
+pagination:
+  start: 1
+  step: 1
+  per_page: 60
+
+parse:
+  driver: html
+  total:
+    selector: "div.search_results span"
+  record:
+    selector: "table.table-searchlist > tbody[id^='itemlist_']"
+  fields:
+    - name: title
+      selector: "h4 > a[rel='mid_name']"
+      attr: title
+    - name: url
+      selector: "h4 > a[rel='mid_name']"
+      attr: href
+      concat: "https:"
+    - name: author
+      selector: "a[rel='go_author']"
+    - name: publisher
+      selector: "a[href*='mid_publish']"
+    - name: date
+      selector: "ul.list-date"
+      regex: "(\\d{4}-\\d{2}-\\d{2})"
+    - name: price
+      selector: "ul.list-nav strong:nth-of-type(2)"
+    - name: photo
+      selector: "img.b-lazy"
+      attr: data-src
+      concat: "https:"
+    - name: isbn
+      selector: ""
+      default: ""
