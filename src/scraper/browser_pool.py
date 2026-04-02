@@ -130,6 +130,12 @@ class BrowserPool(BaseScraper):
         except Exception as e:
             logger.warning("Challenge wait timed out: %s", e)
 
+    async def get_cookies(self) -> list[dict]:
+        """Get all cookies from the browser context."""
+        if self._context:
+            return await self._context.cookies()
+        return []
+
     async def get(self, url: str, *, headers: dict | None = None, params: dict | None = None) -> Response:
         await self._ensure_browser()
         async with self._semaphore:

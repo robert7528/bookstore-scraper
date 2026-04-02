@@ -197,6 +197,16 @@ async def fetch_proxy(target_url: str, request: Request):
                 driver = "browser"
                 browser_resp = await pool.get(target_url)
                 if not _is_challenged_content(browser_resp):
+                    # Sync browser cookies (e.g. cf_clearance) back to curl session
+                    try:
+                        browser_cookies = await pool.get_cookies()
+                        for c in browser_cookies:
+                            session.cookies.set(c["name"], c["value"], domain=c.get("domain", ""))
+                        if browser_cookies:
+                            logger.info("Synced %d browser cookies to curl session %s", len(browser_cookies), sid)
+                    except Exception as e:
+                        logger.warning("Failed to sync browser cookies: %s", e)
+
                     elapsed = time.perf_counter() - t0
                     after = snapshot()
                     record(RequestMetrics(
@@ -225,11 +235,9 @@ async def fetch_proxy(target_url: str, request: Request):
     except Exception as e:
         elapsed = time.perf_counter() - t0
         logger.error("FETCH %s → error: %s (%.2fs)", target_url, e, elapsed)
-        raise HTTPException(status_code=502, detail=str(e))
-    except Exception:
         # Close session on error so next request gets a fresh one
         await session_mgr.close(sid)
-        raise
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 # --- Monitor endpoints ---
