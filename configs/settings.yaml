@@ -18,6 +18,8 @@ session:
   ttl: 300
 
 browser:
+  # 瀏覽器引擎: "playwright" (Playwright), "undetected" (undetected-chromedriver, 可過 Turnstile)
+  engine: "undetected"
   # 同時最多開幾個 tab（防止 CPU/RAM 暴漲）
   max_tabs: 3
   # 瀏覽器閒置多久自動關閉（秒）
@@ -26,5 +28,5 @@ browser:
   challenge_timeout: 15
   # 使用非 headless 模式（需搭配 Xvfb，更不易被 CF 偵測）
   headless: true
-  # 瀏覽器引擎: "chrome" (系統 Google Chrome), "chromium" (Playwright 內建), "auto" (自動偵測)
+  # 瀏覽器引擎（Playwright 用）: "chrome", "chromium", "auto"
   channel: "auto"

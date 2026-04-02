@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from .config.loader import list_sites
+from .config.settings import get as cfg
 from .models.schemas import ProxyRequest, ProxyResponse, SearchRequest, SearchResult
 from .monitor import RequestMetrics, get_current, get_history, record, snapshot
 from .rate_limiter import rate_limiter
@@ -27,11 +28,22 @@ _browser_pool = None
 def _get_browser_pool():
     global _browser_pool
     if _browser_pool is None:
-        try:
-            from .scraper.browser_pool import BrowserPool
-            _browser_pool = BrowserPool()
-        except ImportError:
-            pass
+        engine = cfg("browser.engine", "playwright")
+        if engine == "undetected":
+            try:
+                from .scraper.undetected_browser import UndetectedBrowser
+                _browser_pool = UndetectedBrowser()
+                logger.info("Browser engine: undetected-chromedriver")
+            except ImportError:
+                logger.warning("undetected-chromedriver not installed, falling back to playwright")
+                engine = "playwright"
+        if engine == "playwright":
+            try:
+                from .scraper.browser_pool import BrowserPool
+                _browser_pool = BrowserPool()
+                logger.info("Browser engine: playwright")
+            except ImportError:
+                logger.warning("playwright not installed, browser fallback disabled")
     return _browser_pool
 
 
