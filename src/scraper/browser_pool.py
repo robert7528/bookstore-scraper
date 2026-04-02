@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import time
 
 from playwright.async_api import async_playwright, Browser, BrowserContext
@@ -34,8 +35,10 @@ class BrowserPool(BaseScraper):
     """
 
     def __init__(self, *, headless: bool = cfg("browser.headless", True), timeout: int = 30,
-                 max_tabs: int = DEFAULT_MAX_TABS, idle_timeout: int = DEFAULT_IDLE_TIMEOUT):
+                 max_tabs: int = DEFAULT_MAX_TABS, idle_timeout: int = DEFAULT_IDLE_TIMEOUT,
+                 channel: str = cfg("browser.channel", "auto")):
         self._headless = headless
+        self._channel = channel
         self._timeout = timeout * 1000
         self._max_tabs = max_tabs
         self._idle_timeout = idle_timeout
@@ -48,14 +51,28 @@ class BrowserPool(BaseScraper):
         self._idle_task: asyncio.Task | None = None
         self._warm_pages: dict[str, any] = {}  # domain → page (reuse for CF session)
 
+    def _resolve_channel(self) -> str | None:
+        """Resolve browser channel: auto-detect or use configured value."""
+        ch = self._channel.lower()
+        if ch == "chromium":
+            return None  # Playwright built-in Chromium
+        if ch == "chrome":
+            return "chrome"
+        # auto: prefer Chrome if installed, fallback to Chromium
+        if shutil.which("google-chrome") or shutil.which("google-chrome-stable"):
+            logger.info("Auto-detected system Google Chrome")
+            return "chrome"
+        logger.info("System Chrome not found, using Playwright Chromium")
+        return None
+
     async def _ensure_browser(self):
         async with self._lock:
             if self._browser is None or not self._browser.is_connected():
                 if self._playwright is None:
                     self._playwright = await async_playwright().start()
-                self._browser = await self._playwright.chromium.launch(
+                channel = self._resolve_channel()
+                launch_kwargs = dict(
                     headless=self._headless,
-                    channel="chrome",
                     args=[
                         "--disable-blink-features=AutomationControlled",
                         "--disable-features=IsolateOrigins,site-per-process",
@@ -63,6 +80,9 @@ class BrowserPool(BaseScraper):
                         "--no-default-browser-check",
                     ],
                 )
+                if channel:
+                    launch_kwargs["channel"] = channel
+                self._browser = await self._playwright.chromium.launch(**launch_kwargs)
                 self._context = await self._browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
                     viewport={"width": 1920, "height": 1080},

@@ -26,3 +26,5 @@ browser:
   challenge_timeout: 15
   # 使用非 headless 模式（需搭配 Xvfb，更不易被 CF 偵測）
   headless: true
+  # 瀏覽器引擎: "chrome" (系統 Google Chrome), "chromium" (Playwright 內建), "auto" (自動偵測)
+  channel: "auto"
