@@ -112,9 +112,9 @@ def request(url: str, method: str, header: tuple, body: str, timeout: int, imper
 
 
 @main.command()
-@click.option("--host", default="0.0.0.0", help="Bind host")
-@click.option("--port", default=8000, help="Bind port")
-def serve(host: str, port: int):
+@click.option("--host", default=None, help="Bind host")
+@click.option("--port", default=None, type=int, help="Bind port")
+def serve(host: str | None, port: int | None):
     """Start the API server."""
     import uvicorn
     from .config.settings import get as cfg
