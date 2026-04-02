@@ -57,7 +57,18 @@ class UndetectedBrowser(BaseScraper):
         if headless:
             options.add_argument("--headless=new")
 
-        self._driver = uc.Chrome(options=options, version_main=None)
+        # Auto-detect Chrome version to match chromedriver
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["google-chrome", "--version"], capture_output=True, text=True, timeout=5
+            )
+            version_main = int(result.stdout.strip().split()[-1].split(".")[0])
+            logger.info("Detected Chrome version: %d", version_main)
+        except Exception:
+            version_main = None
+
+        self._driver = uc.Chrome(options=options, version_main=version_main)
         self._driver.set_page_load_timeout(self._timeout)
         logger.info("Undetected Chrome started (headless=%s)", headless)
 
