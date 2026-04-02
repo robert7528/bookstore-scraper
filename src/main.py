@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 
 from .config.loader import list_sites
 from .models.schemas import ProxyRequest, ProxyResponse, SearchRequest, SearchResult
+from .monitor import RequestMetrics, get_current, get_history, record, snapshot
 from .scraper.engine import _is_challenged
 from .scraper.session_manager import SessionManager
 from .sites.runner import run_search
@@ -40,7 +41,7 @@ async def lifespan(app: FastAPI):
         await _browser_pool.close()
 
 
-app = FastAPI(title="Bookstore Scraper", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Bookstore Scraper", version="0.4.0", lifespan=lifespan)
 
 
 # --- HyFSE Python Driver endpoint ---
@@ -53,11 +54,13 @@ async def proxy_request(req: ProxyRequest):
     - 帶 session_id：復用同一 session，cookie 自動保持
     - 碰到 Cloudflare challenge 自動 fallback 到 Playwright 瀏覽器
     """
-    from .scraper.base import Response as ScraperResponse  # noqa: E402
+    from .scraper.base import Response as ScraperResponse
 
     t0 = time.perf_counter()
+    before = snapshot()
     sid = req.session_id or ""
     own_session = not sid
+    driver = "curl"
 
     if not sid:
         sid = uuid.uuid4().hex[:12]
@@ -79,6 +82,7 @@ async def proxy_request(req: ProxyRequest):
             logger.warning("Cloudflare challenge detected for %s, falling back to browser", req.url)
             pool = _get_browser_pool()
             if pool:
+                driver = "browser"
                 if method == "GET":
                     browser_resp = await pool.get(req.url, headers=req.headers or None)
                 else:
@@ -86,6 +90,12 @@ async def proxy_request(req: ProxyRequest):
 
                 if not _is_challenged(browser_resp):
                     elapsed = time.perf_counter() - t0
+                    after = snapshot()
+                    record(RequestMetrics(
+                        url=req.url, method=method, driver=driver,
+                        status_code=browser_resp.status_code, elapsed=elapsed,
+                        before=before, after=after,
+                    ))
                     logger.info("%s %s → %d via BrowserPool (%.2fs)", method, req.url, browser_resp.status_code, elapsed)
                     return ProxyResponse(
                         status_code=browser_resp.status_code,
@@ -99,6 +109,12 @@ async def proxy_request(req: ProxyRequest):
                 logger.warning("Playwright not installed, cannot fallback to browser")
 
         elapsed = time.perf_counter() - t0
+        after = snapshot()
+        record(RequestMetrics(
+            url=req.url, method=method, driver=driver,
+            status_code=r.status_code, elapsed=elapsed,
+            before=before, after=after,
+        ))
         logger.info("%s %s → %d (%.2fs) [session=%s]", method, req.url, r.status_code, elapsed, sid)
         return ProxyResponse(
             status_code=r.status_code,
@@ -110,12 +126,34 @@ async def proxy_request(req: ProxyRequest):
         )
     except Exception as e:
         elapsed = time.perf_counter() - t0
+        after = snapshot()
+        record(RequestMetrics(
+            url=req.url, method=req.method, driver=driver,
+            status_code=0, elapsed=elapsed,
+            before=before, after=after,
+        ))
         logger.error("%s %s → error: %s (%.2fs)", req.method, req.url, e, elapsed)
         return ProxyResponse(status_code=0, elapsed=round(elapsed, 3), exception=str(e))
     finally:
         if own_session:
             await session_mgr.close(sid)
 
+
+# --- Monitor endpoints ---
+
+@app.get("/monitor")
+async def monitor_current():
+    """目前的 CPU / Memory 使用狀態。"""
+    return get_current()
+
+
+@app.get("/monitor/history")
+async def monitor_history(limit: int = 20):
+    """最近的請求資源使用紀錄。"""
+    return {"records": get_history(limit)}
+
+
+# --- Session endpoints ---
 
 @app.delete("/session/{session_id}")
 async def close_session(session_id: str):
@@ -134,7 +172,7 @@ async def list_sessions():
 
 @app.get("/")
 async def root():
-    return {"service": "bookstore-scraper", "version": "0.3.0"}
+    return {"service": "bookstore-scraper", "version": "0.4.0"}
 
 
 @app.get("/sites")
