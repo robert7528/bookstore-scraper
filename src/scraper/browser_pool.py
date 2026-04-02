@@ -93,10 +93,20 @@ class BrowserPool(BaseScraper):
 
         logger.info("Cloudflare challenge detected, waiting...")
         try:
+            # Wait for real page content to appear instead of checking if CF script is gone
+            # (CF script may remain in page even after challenge is resolved)
             await page.wait_for_function(
                 """() => {
-                    return !document.querySelector('script[src*="challenge-platform"]')
-                        && document.querySelector('body').innerText.length > 500;
+                    const body = document.querySelector('body');
+                    if (!body) return false;
+                    const text = body.innerText || '';
+                    // Real page loaded: significant text content
+                    if (text.length > 2000) return true;
+                    // Check for common page elements that indicate real content
+                    if (document.querySelector('h1') && document.querySelector('h1').innerText.length > 0) return true;
+                    if (document.querySelector('.type02_p003')) return true;
+                    if (document.querySelector('.table-searchlist')) return true;
+                    return false;
                 }""",
                 timeout=CHALLENGE_TIMEOUT,
             )

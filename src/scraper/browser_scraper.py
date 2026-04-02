@@ -44,11 +44,16 @@ class BrowserScraper(BaseScraper):
 
         logger.info("Cloudflare challenge detected, waiting for resolution...")
         try:
-            # Wait until the challenge script is gone and real content loads
             await page.wait_for_function(
                 """() => {
-                    return !document.querySelector('script[src*="challenge-platform"]')
-                        && document.querySelector('body').innerText.length > 500;
+                    const body = document.querySelector('body');
+                    if (!body) return false;
+                    const text = body.innerText || '';
+                    if (text.length > 2000) return true;
+                    if (document.querySelector('h1') && document.querySelector('h1').innerText.length > 0) return true;
+                    if (document.querySelector('.type02_p003')) return true;
+                    if (document.querySelector('.table-searchlist')) return true;
+                    return false;
                 }""",
                 timeout=CHALLENGE_TIMEOUT,
             )
