@@ -189,6 +189,12 @@ async def fetch_proxy(target_url: str, request: Request):
     if not target_url.startswith("http"):
         target_url = "https://" + target_url
 
+    # Auto-encode non-ASCII characters (e.g. Chinese keywords from HyFSE)
+    from urllib.parse import quote, urlparse, urlunparse
+    parsed = urlparse(target_url)
+    if parsed.path != quote(parsed.path, safe="/:@!$&'()*+,;=-._~"):
+        target_url = urlunparse(parsed._replace(path=quote(parsed.path, safe="/:@!$&'()*+,;=-._~")))
+
     # Rate limit per domain to avoid WAF blocking
     wait_time = await rate_limiter.wait(target_url)
     if wait_time > 0:
