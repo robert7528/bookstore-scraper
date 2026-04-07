@@ -25,11 +25,18 @@ def _detect_impersonate() -> str:
         for v in [version, 136, 131, 124, 120]:
             imp = f"chrome{v}"
             try:
-                Session(impersonate=imp).close()
+                s = Session(impersonate=imp)
+                s.get("https://example.com", timeout=5)
+                s.close()
                 logger.info("Auto-detected impersonate: %s (system Chrome: %d)", imp, version)
                 return imp
-            except Exception:
-                continue
+            except Exception as e:
+                if "not supported" in str(e).lower():
+                    logger.debug("Impersonate %s not supported, trying next", imp)
+                    continue
+                # Other errors (network etc) — version is supported
+                logger.info("Auto-detected impersonate: %s (system Chrome: %d)", imp, version)
+                return imp
         logger.warning("No supported impersonate version found, using chrome136")
         return "chrome136"
     except Exception:
