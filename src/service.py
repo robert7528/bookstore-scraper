@@ -119,88 +119,80 @@ def _linux_status():
     subprocess.run(["systemctl", "status", SERVICE_NAME, "--no-pager"], check=False)
 
 
-# ─── Windows (sc.exe + pythonw) ──────────────────────────────────────────────
+# ─── Windows (WinSW) ────────────────────────────────────────────────────────
 
-def _win_get_pythonw() -> str:
-    """Get pythonw.exe path (no console window)."""
-    p = Path(_get_python())
-    pythonw = p.parent / "pythonw.exe"
-    if pythonw.exists():
-        return str(pythonw)
-    return str(p)
+WINSW_URL = "https://github.com/winsw/winsw/releases/download/v3.0.0-alpha.11/WinSW-net461.exe"
+
+
+def _win_get_winsw() -> Path:
+    """Get or download WinSW executable."""
+    app_dir = _get_app_dir()
+    winsw = app_dir / "deploy" / f"{SERVICE_NAME}.exe"
+    if winsw.exists():
+        return winsw
+
+    # Try to download WinSW
+    src = app_dir / "deploy" / "WinSW.exe"
+    if src.exists():
+        import shutil
+        shutil.copy2(src, winsw)
+        return winsw
+
+    print(f"Downloading WinSW...")
+    try:
+        import urllib.request
+        urllib.request.urlretrieve(WINSW_URL, str(winsw))
+        print(f"  Downloaded: {winsw}")
+    except Exception as e:
+        raise FileNotFoundError(
+            f"WinSW not found. Please download from {WINSW_URL} "
+            f"and save as {winsw}"
+        ) from e
+    return winsw
+
+
+def _win_ensure_xml():
+    """Ensure WinSW XML config exists next to the exe."""
+    app_dir = _get_app_dir()
+    xml_src = app_dir / "deploy" / "bookstore-scraper.xml"
+    xml_dst = app_dir / "deploy" / f"{SERVICE_NAME}.xml"
+    if xml_src.exists() and not xml_dst.exists():
+        import shutil
+        shutil.copy2(xml_src, xml_dst)
+
+    # Create logs directory
+    (app_dir / "logs").mkdir(exist_ok=True)
 
 
 def _win_install():
-    app_dir = _get_app_dir()
-    python = _get_python()
-    # Use NSSM if available, otherwise sc.exe
-    nssm = _win_find_nssm()
-    if nssm:
-        subprocess.run([nssm, "install", SERVICE_NAME, python, "-m", "src.cli", "serve"], check=True)
-        subprocess.run([nssm, "set", SERVICE_NAME, "AppDirectory", str(app_dir)], check=True)
-        subprocess.run([nssm, "set", SERVICE_NAME, "DisplayName", DISPLAY_NAME], check=True)
-        subprocess.run([nssm, "set", SERVICE_NAME, "Description", DESCRIPTION], check=True)
-
-        log_dir = app_dir / "logs"
-        log_dir.mkdir(exist_ok=True)
-        subprocess.run([nssm, "set", SERVICE_NAME, "AppStdout", str(log_dir / "service.log")], check=True)
-        subprocess.run([nssm, "set", SERVICE_NAME, "AppStderr", str(log_dir / "error.log")], check=True)
-        subprocess.run([nssm, "set", SERVICE_NAME, "AppRotateFiles", "1"], check=True)
-        subprocess.run([nssm, "set", SERVICE_NAME, "AppRotateBytes", "10485760"], check=True)
-        print(f"Service installed via NSSM: {SERVICE_NAME}")
-    else:
-        bin_path = f'"{python}" -m src.cli serve'
-        subprocess.run([
-            "sc.exe", "create", SERVICE_NAME,
-            f"binPath={bin_path}",
-            f"DisplayName={DISPLAY_NAME}",
-            "start=auto",
-        ], check=True)
-        print(f"Service installed via sc.exe: {SERVICE_NAME}")
-        print("  Note: Install NSSM for better service management (log rotation, restart).")
+    winsw = _win_get_winsw()
+    _win_ensure_xml()
+    subprocess.run([str(winsw), "install"], check=True, cwd=str(winsw.parent))
+    print(f"Service installed via WinSW: {SERVICE_NAME}")
 
 
 def _win_uninstall():
-    nssm = _win_find_nssm()
-    if nssm:
-        subprocess.run([nssm, "stop", SERVICE_NAME], check=False)
-        subprocess.run([nssm, "remove", SERVICE_NAME, "confirm"], check=True)
-    else:
-        subprocess.run(["sc.exe", "stop", SERVICE_NAME], check=False)
-        subprocess.run(["sc.exe", "delete", SERVICE_NAME], check=True)
+    winsw = _win_get_winsw()
+    subprocess.run([str(winsw), "stop"], check=False, cwd=str(winsw.parent))
+    subprocess.run([str(winsw), "uninstall"], check=True, cwd=str(winsw.parent))
     print("Service uninstalled.")
 
 
 def _win_start():
-    nssm = _win_find_nssm()
-    if nssm:
-        subprocess.run([nssm, "start", SERVICE_NAME], check=True)
-    else:
-        subprocess.run(["sc.exe", "start", SERVICE_NAME], check=True)
+    winsw = _win_get_winsw()
+    subprocess.run([str(winsw), "start"], check=True, cwd=str(winsw.parent))
     print("Service started.")
 
 
 def _win_stop():
-    nssm = _win_find_nssm()
-    if nssm:
-        subprocess.run([nssm, "stop", SERVICE_NAME], check=True)
-    else:
-        subprocess.run(["sc.exe", "stop", SERVICE_NAME], check=True)
+    winsw = _win_get_winsw()
+    subprocess.run([str(winsw), "stop"], check=True, cwd=str(winsw.parent))
     print("Service stopped.")
 
 
 def _win_status():
-    nssm = _win_find_nssm()
-    if nssm:
-        subprocess.run([nssm, "status", SERVICE_NAME], check=False)
-    else:
-        subprocess.run(["sc.exe", "query", SERVICE_NAME], check=False)
-
-
-def _win_find_nssm() -> str | None:
-    """Find NSSM executable."""
-    import shutil
-    return shutil.which("nssm")
+    winsw = _win_get_winsw()
+    subprocess.run([str(winsw), "status"], check=False, cwd=str(winsw.parent))
 
 
 # ─── Dispatcher ──────────────────────────────────────────────────────────────

@@ -1,0 +1,18 @@
+<service>
+  <id>bookstore-scraper</id>
+  <name>Bookstore Scraper API</name>
+  <description>HyFSE Anti-Bot Fetch Proxy - TLS fingerprint proxy service</description>
+  <executable>%BASE%\.venv\Scripts\python.exe</executable>
+  <arguments>-m src.cli serve</arguments>
+  <workingdirectory>%BASE%</workingdirectory>
+  <logpath>%BASE%\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <env name="PYTHONUNBUFFERED" value="1"/>
+</service>
