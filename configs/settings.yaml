@@ -21,7 +21,9 @@ browser:
   engine: "undetected"
   # 同時最多開幾個 tab（Playwright engine 用，undetected engine 無效）
   max_tabs: 3
-  # 同時最多幾個 browser 請求（undetected engine 用，每個 worker 一個 Chrome 進程）
+  # 同時最多幾個 browser 請求（undetected engine 用）
+  # 目前僅支援 1（單一 Chrome 進程 + 單一 tab，序列處理）
+  # TODO: 支援 >1 需改架構為每個 worker 一個 Chrome 進程
   max_workers: 1
   # 瀏覽器閒置多久自動關閉（秒）
   idle_timeout: 300
