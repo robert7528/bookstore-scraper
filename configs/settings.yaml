@@ -19,8 +19,10 @@ session:
 browser:
   # 瀏覽器引擎: "playwright" (Playwright), "undetected" (undetected-chromedriver, 可過 Turnstile)
   engine: "undetected"
-  # 同時最多開幾個 tab（防止 CPU/RAM 暴漲）
+  # 同時最多開幾個 tab（Playwright engine 用，undetected engine 無效）
   max_tabs: 3
+  # 同時最多幾個 browser 請求（undetected engine 用，每個 worker 一個 Chrome 進程）
+  max_workers: 1
   # 瀏覽器閒置多久自動關閉（秒）
   idle_timeout: 300
   # 瀏覽器最長存活時間（秒），到期強制重啟，防止記憶體洩漏。0=不限制

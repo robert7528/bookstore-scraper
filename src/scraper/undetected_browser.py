@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 CHALLENGE_TIMEOUT = cfg("browser.challenge_timeout", 15)
 CHALLENGE_SIGNS = ["challenge-platform", "cf-browser-verification", "Just a moment"]
 
-_executor = ThreadPoolExecutor(max_workers=cfg("browser.max_tabs", 3))
+_executor = ThreadPoolExecutor(max_workers=cfg("browser.max_workers", 1))
 
 
 class UndetectedBrowser(BaseScraper):
