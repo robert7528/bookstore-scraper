@@ -57,9 +57,13 @@ class SessionManager:
         ]
 
     def _cleanup_expired(self) -> None:
+        import asyncio
         now = time.time()
         expired = [sid for sid, (_, ts) in self._sessions.items() if now - ts > SESSION_TTL]
         for sid in expired:
             session, _ = self._sessions.pop(sid)
-            session.close()
+            try:
+                asyncio.get_event_loop().create_task(session.close())
+            except RuntimeError:
+                pass
             logger.info("Expired session: %s", sid)
