@@ -27,7 +27,9 @@ browser:
   max_lifetime: 7200
   # Cloudflare challenge 等待逾時（秒）
   challenge_timeout: 15
-  # headless 模式: true (無視窗), false (需搭配 Xvfb，可過 CF Turnstile)
+  # headless 模式:
+  #   Linux:   false (需搭配 Xvfb，可過 CF Turnstile) | true (省資源但過不了 Turnstile)
+  #   Windows: false (有桌面環境，直接可用) | true (service 模式下可能需要)
   headless: false
   # 瀏覽器引擎（Playwright 用）: "chrome", "chromium", "auto"
   channel: "auto"

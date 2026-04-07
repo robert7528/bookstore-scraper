@@ -46,28 +46,42 @@ if (Test-Path "$AppDir\.git") {
     Write-Info "Cloned: $AppDir"
 }
 
-# --- [3/5] Install dependencies ---
+# --- [3/6] Install dependencies ---
 
 Write-Host ""
-Write-Host "=== [3/5] Install dependencies ==="
+Write-Host "=== [3/6] Install dependencies ==="
 if (-not (Test-Path "$AppDir\.venv")) {
     python -m venv .venv
     Write-Info "Created venv"
 }
-.venv\Scripts\pip install -e . --quiet
+.venv\Scripts\pip install -e ".[undetected]" --quiet
 Write-Info "Dependencies installed"
 
-# --- [4/5] Create directories ---
+# --- [4/6] Check Google Chrome ---
 
 Write-Host ""
-Write-Host "=== [4/5] Create directories ==="
+Write-Host "=== [4/6] Check Google Chrome ==="
+$chromePath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+if (Test-Path $chromePath) {
+    $chromeVer = (Get-Item $chromePath).VersionInfo.FileVersion
+    Write-Info "Google Chrome: $chromeVer"
+} else {
+    Write-Host "  WARNING: Google Chrome not found at $chromePath" -ForegroundColor Yellow
+    Write-Host "  Download from: https://www.google.com/chrome/" -ForegroundColor Yellow
+    Write-Host "  Browser fallback (Turnstile bypass) requires Chrome." -ForegroundColor Yellow
+}
+
+# --- [5/6] Create directories ---
+
+Write-Host ""
+Write-Host "=== [5/6] Create directories ==="
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 Write-Info $LogDir
 
-# --- [5/5] Install and start service ---
+# --- [6/6] Install and start service ---
 
 Write-Host ""
-Write-Host "=== [5/5] Install and start service ==="
+Write-Host "=== [6/6] Install and start service ==="
 
 # Stop existing service if running
 try { .venv\Scripts\python -m src.cli service stop *>$null } catch {}
@@ -89,8 +103,8 @@ Write-Host "Done." -ForegroundColor Green
 Write-Host "  App:      $AppDir"
 Write-Host "  Config:   $AppDir\configs\settings.yaml"
 Write-Host "  Logs:     $LogDir"
-Write-Host "  API:      http://localhost:8000"
-Write-Host "  Docs:     http://localhost:8000/docs"
+Write-Host "  API:      http://localhost:8101"
+Write-Host "  Docs:     http://localhost:8101/docs"
 Write-Host ""
 Write-Host "Commands:"
 Write-Host "  .venv\Scripts\python -m src.cli service status"
