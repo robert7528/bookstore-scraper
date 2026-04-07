@@ -148,22 +148,31 @@ class UndetectedBrowser(BaseScraper):
             except Exception:
                 pass
             self._driver = None
-            # Kill entire Chrome process tree
+            # Kill entire Chrome process tree and reap zombies
+            import os, signal, subprocess
             if pid:
                 try:
-                    import subprocess
-                    # Kill all child processes of the Chrome main process
-                    subprocess.run(["pkill", "-P", str(pid)], capture_output=True, timeout=5)
-                    import os, signal
-                    os.kill(pid, signal.SIGTERM)
+                    subprocess.run(["pkill", "-9", "-P", str(pid)], capture_output=True, timeout=5)
+                    os.kill(pid, signal.SIGKILL)
                 except (ProcessLookupError, OSError):
                     pass
-            # Cleanup any orphaned chromedriver and chrome processes
+                try:
+                    os.waitpid(pid, os.WNOHANG)
+                except ChildProcessError:
+                    pass
+            # Cleanup orphaned processes
             try:
-                import subprocess
-                subprocess.run(["pkill", "-f", "undetected_chromedriver"], capture_output=True, timeout=5)
-                subprocess.run(["pkill", "-f", "--user-data-dir=/tmp/tmp"], capture_output=True, timeout=5)
+                subprocess.run(["pkill", "-9", "-f", "undetected_chromedriver"], capture_output=True, timeout=5)
+                subprocess.run(["pkill", "-9", "-f", "--user-data-dir=/tmp/tmp"], capture_output=True, timeout=5)
             except Exception:
+                pass
+            # Reap any zombie children
+            try:
+                while True:
+                    p, _ = os.waitpid(-1, os.WNOHANG)
+                    if p == 0:
+                        break
+            except ChildProcessError:
                 pass
             logger.info("Undetected Chrome stopped (requests served: %d)", self._request_count)
 
