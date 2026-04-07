@@ -138,12 +138,33 @@ class UndetectedBrowser(BaseScraper):
 
     def _close_sync(self):
         if self._driver:
+            pid = None
+            try:
+                pid = self._driver.browser_pid
+            except Exception:
+                pass
             try:
                 self._driver.quit()
             except Exception:
                 pass
             self._driver = None
-            logger.info("Undetected Chrome stopped")
+            # Kill lingering Chrome child processes
+            if pid:
+                try:
+                    import os, signal
+                    os.kill(pid, signal.SIGTERM)
+                except (ProcessLookupError, OSError):
+                    pass
+            # Cleanup any orphaned chrome processes from our user-data-dir
+            try:
+                import subprocess
+                subprocess.run(
+                    ["pkill", "-f", "undetected_chromedriver"],
+                    capture_output=True, timeout=5
+                )
+            except Exception:
+                pass
+            logger.info("Undetected Chrome stopped (requests served: %d)", self._request_count)
 
     async def get(self, url: str, *, headers: dict | None = None, params: dict | None = None) -> Response:
         loop = asyncio.get_event_loop()
