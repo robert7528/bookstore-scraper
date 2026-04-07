@@ -16,13 +16,22 @@ def _detect_impersonate() -> str:
         return configured
     try:
         import subprocess
+        from curl_cffi.requests import Session
         result = subprocess.run(
             ["google-chrome", "--version"], capture_output=True, text=True, timeout=5
         )
         version = int(result.stdout.strip().split()[-1].split(".")[0])
-        imp = f"chrome{version}"
-        logger.info("Auto-detected impersonate: %s", imp)
-        return imp
+        # Try detected version, fallback to lower versions if not supported
+        for v in [version, 136, 131, 124, 120]:
+            imp = f"chrome{v}"
+            try:
+                Session(impersonate=imp).close()
+                logger.info("Auto-detected impersonate: %s (system Chrome: %d)", imp, version)
+                return imp
+            except Exception:
+                continue
+        logger.warning("No supported impersonate version found, using chrome136")
+        return "chrome136"
     except Exception:
         logger.info("Chrome not found, using default impersonate: chrome136")
         return "chrome136"
