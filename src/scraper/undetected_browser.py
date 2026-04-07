@@ -32,17 +32,27 @@ class UndetectedBrowser(BaseScraper):
         self._driver = None
         self._lock = asyncio.Lock()
         self._last_used: float = 0
+        self._created_at: float = 0
         self._idle_timeout = cfg("browser.idle_timeout", 300)
+        self._max_lifetime = cfg("browser.max_lifetime", 7200)
         self._idle_task: asyncio.Task | None = None
+        self._request_count: int = 0
 
     def _ensure_driver_sync(self):
         """Create Chrome driver (must run in thread — selenium is sync)."""
         if self._driver is not None:
-            try:
-                _ = self._driver.title
-                return
-            except Exception:
-                self._driver = None
+            # Check if max lifetime exceeded
+            if self._max_lifetime > 0 and time.time() - self._created_at > self._max_lifetime:
+                logger.info("Chrome max lifetime (%ds) exceeded, restarting (requests served: %d)",
+                            self._max_lifetime, self._request_count)
+                self._close_sync()
+            else:
+                try:
+                    _ = self._driver.title
+                    return
+                except Exception:
+                    logger.warning("Chrome driver lost, restarting")
+                    self._driver = None
 
         import undetected_chromedriver as uc
 
@@ -70,11 +80,14 @@ class UndetectedBrowser(BaseScraper):
 
         self._driver = uc.Chrome(options=options, version_main=version_main)
         self._driver.set_page_load_timeout(self._timeout)
-        logger.info("Undetected Chrome started (headless=%s)", headless)
+        self._created_at = time.time()
+        self._request_count = 0
+        logger.info("Undetected Chrome started (headless=%s, max_lifetime=%ds)", headless, self._max_lifetime)
 
     def _get_page_sync(self, url: str) -> Response:
         """Fetch URL with challenge handling (sync, runs in thread)."""
         self._ensure_driver_sync()
+        self._request_count += 1
         driver = self._driver
 
         driver.get(url)
@@ -156,8 +169,19 @@ class UndetectedBrowser(BaseScraper):
         async def _watch():
             while True:
                 await asyncio.sleep(60)
-                if self._driver and time.time() - self._last_used > self._idle_timeout:
-                    logger.info("Undetected Chrome idle for %ds, shutting down", self._idle_timeout)
+                if not self._driver:
+                    break
+                now = time.time()
+                # Idle timeout
+                if now - self._last_used > self._idle_timeout:
+                    logger.info("Undetected Chrome idle for %ds, shutting down (requests served: %d)",
+                                self._idle_timeout, self._request_count)
+                    await self.close()
+                    break
+                # Max lifetime
+                if self._max_lifetime > 0 and now - self._created_at > self._max_lifetime:
+                    logger.info("Undetected Chrome max lifetime (%ds) reached, shutting down (requests served: %d)",
+                                self._max_lifetime, self._request_count)
                     await self.close()
                     break
 

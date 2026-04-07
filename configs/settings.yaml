@@ -23,6 +23,8 @@ browser:
   max_tabs: 3
   # 瀏覽器閒置多久自動關閉（秒）
   idle_timeout: 300
+  # 瀏覽器最長存活時間（秒），到期強制重啟，防止記憶體洩漏。0=不限制
+  max_lifetime: 7200
   # Cloudflare challenge 等待逾時（秒）
   challenge_timeout: 15
   # headless 模式: true (無視窗), false (需搭配 Xvfb，可過 CF Turnstile)
