@@ -73,11 +73,11 @@ else
     info "WARNING: Xvfb not installed (headless: false requires Xvfb)"
 fi
 
-# --- [5/7] Install Playwright browser (optional fallback) ---
+# --- [5/7] Playwright (optional, not installed by default) ---
 
 echo ""
-echo "=== [5/7] Install Playwright browser (optional) ==="
-.venv/bin/python -m playwright install chromium 2>/dev/null || info "Playwright chromium skipped"
+echo "=== [5/7] Playwright (skipped — using undetected-chromedriver) ==="
+info "To install Playwright if needed: .venv/bin/pip install playwright && .venv/bin/python -m playwright install chromium"
 
 # --- [6/7] Create directories ---
 
