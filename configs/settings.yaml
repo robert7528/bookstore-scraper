@@ -46,3 +46,9 @@ proxy:
   # 自簽憑證（CONNECT MitM 用，不存在時自動產生）
   cert_file: "configs/proxy-cert.pem"
   key_file: "configs/proxy-key.pem"
+  # 需要 MitM + curl_cffi 繞過 CF 的 domain 清單
+  # 這些 domain 會攔截 TLS，用 curl_cffi 重新發請求（TLS fingerprint impersonation）
+  # 未列入的 domain 走透明轉發（跟 Squid 一樣，保持 HyProxy 原始 TLS/cookie）
+  mitm_domains:
+    - "jcr.clarivate.com"
+    - "www.webofscience.com"
