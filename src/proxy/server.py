@@ -1,28 +1,27 @@
-"""HTTP forward proxy server — asyncio TCP server with CONNECT MitM support.
+"""HTTP forward proxy server — asyncio TCP server.
 
 Supports:
-- Plain HTTP proxy: GET http://example.com/path HTTP/1.1
-- HTTPS via CONNECT + MitM TLS: CONNECT host:443 HTTP/1.1
+- Plain HTTP proxy: GET http://example.com/path HTTP/1.1 → curl_cffi
+- HTTPS via CONNECT: transparent TCP tunnel (like Squid)
 
-HyProxy has InsecureSkipVerify=true, so self-signed cert works for MitM.
+CONNECT uses transparent tunneling by default so that HyProxy's own
+TLS/cookies/headers reach the origin untouched.  Only plain HTTP requests
+go through curl_cffi (for TLS fingerprint impersonation).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-import ssl
-from urllib.parse import urlparse
 
 from ..config.settings import get as cfg
 from ..scraper.session_manager import SessionManager
 from .handler import handle_proxy_request, build_http_response
-from .tls import get_ssl_context
 
 logger = logging.getLogger(__name__)
 
 
 class ProxyServer:
-    """HTTP forward proxy with CONNECT MitM TLS support."""
+    """HTTP forward proxy with transparent CONNECT tunneling."""
 
     def __init__(self, host: str, port: int, session_mgr: SessionManager, browser_pool=None):
         self._host = host
@@ -30,21 +29,13 @@ class ProxyServer:
         self._session_mgr = session_mgr
         self._browser_pool = browser_pool
         self._server = None
-        self._ssl_context = None
 
     async def start(self):
         """Start the proxy TCP server."""
-        # Pre-load SSL context for CONNECT MitM
-        try:
-            self._ssl_context = get_ssl_context()
-            logger.info("SSL context loaded for CONNECT MitM")
-        except Exception as e:
-            logger.warning("SSL context failed: %s (CONNECT will be unavailable)", e)
-
         self._server = await asyncio.start_server(
             self._handle_client, self._host, self._port
         )
-        logger.info("Forward proxy listening on %s:%d", self._host, self._port)
+        logger.info("Forward proxy listening on %s:%d (CONNECT=transparent tunnel)", self._host, self._port)
 
     async def stop(self):
         """Stop the proxy server."""
@@ -102,7 +93,7 @@ class ProxyServer:
         # Read body if present
         body = await self._read_body(headers, reader)
 
-        # Execute request
+        # Execute request via curl_cffi
         status, resp_headers, resp_body = await handle_proxy_request(
             method, url, headers, body, self._session_mgr, self._browser_pool
         )
@@ -113,104 +104,79 @@ class ProxyServer:
         await writer.drain()
 
     async def _handle_connect(self, target: str, headers: dict, reader, writer, peer):
-        """Handle CONNECT request with MitM TLS.
+        """Handle CONNECT with transparent TCP tunneling.
 
-        Flow:
-        1. Reply 200 Connection established
-        2. TLS handshake with client (self-signed cert)
-        3. Read decrypted HTTP request from client
-        4. Forward via curl_cffi to origin
-        5. Return response through TLS tunnel
+        Just relay bytes between client and origin — no TLS interception.
+        This preserves HyProxy's own TLS handshake, cookies, and headers.
         """
-        if not self._ssl_context:
-            writer.write(b"HTTP/1.1 501 CONNECT Not Supported (no SSL cert)\r\n\r\n")
-            await writer.drain()
-            return
-
         # Parse target host:port
         if ":" in target:
-            host, port = target.rsplit(":", 1)
+            host, port_str = target.rsplit(":", 1)
+            port = int(port_str)
         else:
-            host, port = target, "443"
+            host, port = target, 443
 
-        logger.debug("CONNECT %s from %s", target, peer)
+        logger.info("CONNECT %s (transparent tunnel) from %s", target, peer)
+
+        # Connect to origin
+        try:
+            remote_reader, remote_writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=30
+            )
+        except Exception as e:
+            logger.error("CONNECT failed to %s: %s", target, e)
+            writer.write(f"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n".encode())
+            await writer.drain()
+            return
 
         # Reply 200 to establish tunnel
         writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
         await writer.drain()
 
-        # Upgrade connection to TLS (MitM)
+        # Relay bytes bidirectionally
+        await self._relay(reader, writer, remote_reader, remote_writer, target)
+
+    async def _relay(self, client_reader, client_writer, remote_reader, remote_writer, target):
+        """Relay bytes between client and remote until either side closes."""
+
+        async def _forward(src, dst, label):
+            try:
+                while True:
+                    data = await src.read(65536)
+                    if not data:
+                        break
+                    dst.write(data)
+                    await dst.drain()
+            except (ConnectionResetError, BrokenPipeError, asyncio.CancelledError):
+                pass
+            except Exception as e:
+                logger.debug("Relay %s error for %s: %s", label, target, e)
+            finally:
+                try:
+                    dst.close()
+                except Exception:
+                    pass
+
+        task_c2r = asyncio.create_task(_forward(client_reader, remote_writer, "client→remote"))
+        task_r2c = asyncio.create_task(_forward(remote_reader, client_writer, "remote→client"))
+
+        # Wait for either direction to finish, then cancel the other
+        done, pending = await asyncio.wait(
+            [task_c2r, task_r2c], return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in pending:
+            task.cancel()
+        # Wait for cancelled tasks to finish
+        await asyncio.gather(*pending, return_exceptions=True)
+
+        # Clean up remote connection
         try:
-            transport = writer.transport
-            protocol = transport.get_protocol()
-
-            # Perform TLS handshake as server
-            ssl_transport = await asyncio.get_event_loop().start_tls(
-                transport, protocol, self._ssl_context, server_side=True
-            )
-
-            # Create new reader/writer for the TLS connection
-            tls_reader = asyncio.StreamReader()
-            tls_protocol = asyncio.StreamReaderProtocol(tls_reader)
-            ssl_transport.set_protocol(tls_protocol)
-            tls_writer = asyncio.StreamWriter(ssl_transport, tls_protocol, tls_reader, asyncio.get_event_loop())
-
-            # Handle requests inside the TLS tunnel
-            await self._handle_tunnel(host, port, tls_reader, tls_writer, peer)
-
-        except ssl.SSLError as e:
-            logger.warning("TLS handshake failed for %s: %s", target, e)
-        except Exception as e:
-            logger.error("CONNECT tunnel error for %s: %s", target, e)
-
-    async def _handle_tunnel(self, host: str, port: str, reader, writer, peer):
-        """Handle HTTP requests inside a TLS tunnel (after CONNECT MitM)."""
-        try:
-            while True:
-                # Read request line from decrypted stream
-                request_line = await asyncio.wait_for(reader.readline(), timeout=60)
-                if not request_line:
-                    break
-
-                request_line = request_line.decode("utf-8", errors="replace").strip()
-                if not request_line:
-                    break
-
-                parts = request_line.split(" ", 2)
-                if len(parts) < 3:
-                    break
-
-                method, path, version = parts
-
-                # Read headers
-                headers = await self._read_headers(reader)
-
-                # Build full URL (path is relative inside tunnel)
-                scheme = "https"
-                url = f"{scheme}://{host}{path}"
-
-                # Read body
-                body = await self._read_body(headers, reader)
-
-                # Execute request
-                status, resp_headers, resp_body = await handle_proxy_request(
-                    method, url, headers, body, self._session_mgr, self._browser_pool
-                )
-
-                # Send response through tunnel
-                response = build_http_response(status, resp_headers, resp_body)
-                writer.write(response)
-                await writer.drain()
-
-                # Check if connection should close
-                conn = headers.get("connection", "").lower()
-                if conn == "close":
-                    break
-
-        except asyncio.TimeoutError:
+            remote_writer.close()
+            await remote_writer.wait_closed()
+        except Exception:
             pass
-        except Exception as e:
-            logger.debug("Tunnel closed for %s: %s", host, e)
+
+        logger.debug("CONNECT tunnel closed: %s", target)
 
     async def _read_headers(self, reader) -> dict[str, str]:
         """Read HTTP headers until blank line."""
