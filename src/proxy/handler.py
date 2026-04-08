@@ -100,9 +100,10 @@ async def handle_proxy_request(
         resp_headers = dict(r.headers)
         resp_body = r.content
 
-        # Challenge detection — only for text/html responses
+        # Challenge detection — only for text/html, skip 3xx redirects
         content_type = resp_headers.get("content-type", "")
-        if "text/html" in content_type:
+        is_redirect = 300 <= status_code < 400
+        if "text/html" in content_type and not is_redirect:
             text = r.text[:5000]
             is_challenged = (
                 "<title>Just a moment...</title>" in text
