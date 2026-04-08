@@ -30,23 +30,22 @@ class ProxyServer:
         self._browser_pool = browser_pool
         self._server = None
         self._ssl_context = None
-        self._mitm_domains: set[str] = set()
+        self._transparent_domains: set[str] = set()
 
     async def start(self):
         """Start the proxy TCP server."""
-        # Load MitM domain list
-        raw = cfg("proxy.mitm_domains", [])
+        # Load transparent (bypass MitM) domain list
+        raw = cfg("proxy.transparent_domains", [])
         if isinstance(raw, list):
-            self._mitm_domains = set(raw)
-        logger.info("MitM domains: %s", self._mitm_domains or "(none — all CONNECT transparent)")
+            self._transparent_domains = set(raw)
+        logger.info("Transparent domains (bypass MitM): %s", self._transparent_domains or "(none — all MitM)")
 
-        # Pre-load SSL context for MitM (only if mitm_domains configured)
-        if self._mitm_domains:
-            try:
-                self._ssl_context = get_ssl_context()
-                logger.info("SSL context loaded for CONNECT MitM")
-            except Exception as e:
-                logger.warning("SSL context failed: %s (MitM will be unavailable)", e)
+        # Pre-load SSL context for MitM
+        try:
+            self._ssl_context = get_ssl_context()
+            logger.info("SSL context loaded for CONNECT MitM")
+        except Exception as e:
+            logger.warning("SSL context failed: %s (all CONNECT will be transparent)", e)
 
         self._server = await asyncio.start_server(
             self._handle_client, self._host, self._port
@@ -61,8 +60,13 @@ class ProxyServer:
             logger.info("Forward proxy stopped")
 
     def _needs_mitm(self, host: str) -> bool:
-        """Check if a host needs MitM (curl_cffi) for CF bypass."""
-        return host in self._mitm_domains
+        """Check if a host needs MitM (curl_cffi) for CF bypass.
+
+        Default is MitM (for CF bypass). Only transparent_domains bypass MitM.
+        """
+        if not self._ssl_context:
+            return False
+        return host not in self._transparent_domains
 
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """Handle one proxy client connection."""
