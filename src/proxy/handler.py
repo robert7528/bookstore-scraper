@@ -51,6 +51,11 @@ async def handle_proxy_request(
 
     session = session_mgr.get_or_create(sid)
 
+    # Clear session cookie jar — proxy should NOT manage cookies.
+    # HyProxy/browser manages cookies and sends them via request headers.
+    # Dual cookie management (curl_cffi session + HyProxy) causes auth loops.
+    session.cookies.clear()
+
     # Rate limit
     wait_time = await rate_limiter.wait(url)
     if wait_time > 0:
