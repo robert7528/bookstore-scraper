@@ -10,6 +10,7 @@ class Response:
     text: str
     headers: dict[str, str] = field(default_factory=dict)
     url: str = ""
+    content: bytes = b""
 
 
 class BaseScraper(abc.ABC):

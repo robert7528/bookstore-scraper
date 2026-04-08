@@ -49,9 +49,25 @@ def _get_browser_pool():
 
 
 
+_proxy_server = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _proxy_server
+    # Start forward proxy if enabled
+    if cfg("proxy.enabled", False):
+        from .proxy.server import ProxyServer
+        proxy_host = cfg("proxy.host", "0.0.0.0")
+        proxy_port = cfg("proxy.port", 8102)
+        _proxy_server = ProxyServer(proxy_host, proxy_port, session_mgr, _get_browser_pool())
+        await _proxy_server.start()
+
     yield
+
+    # Shutdown
+    if _proxy_server:
+        await _proxy_server.stop()
     await session_mgr.close_all()
     if _browser_pool:
         await _browser_pool.close()

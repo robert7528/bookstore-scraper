@@ -60,6 +60,7 @@ class CurlScraper(BaseScraper):
             text=r.text,
             headers=dict(r.headers),
             url=str(r.url),
+            content=r.content,
         )
 
     async def get(self, url: str, *, headers: dict | None = None, params: dict | None = None) -> Response:
