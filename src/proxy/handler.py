@@ -65,7 +65,7 @@ async def handle_proxy_request(
     body: bytes,
     session_mgr: SessionManager,
     browser_pool=None,
-) -> tuple[int, dict[str, str], bytes]:
+) -> tuple[int, list[tuple[str, str]], bytes]:
     """Execute proxied request via curl_cffi and return (status, headers, body_bytes).
 
     Flow:
@@ -97,13 +97,14 @@ async def handle_proxy_request(
         r = await _curl_request(session_mgr, sid, method, url, clean_headers, body)
 
         status_code = r.status_code
-        resp_headers = dict(r.headers)
+        # Use multi_items() to preserve duplicate headers (e.g. multiple Set-Cookie)
+        resp_header_list = list(r.headers.multi_items())
         resp_body = r.content
-        content_type = resp_headers.get("content-type", "")
+        content_type = r.headers.get("content-type", "")
 
         # Debug logging for diagnosis
         if status_code >= 300 or "login" in url.lower() or "auth" in url.lower():
-            location = resp_headers.get("location", resp_headers.get("Location", ""))
+            location = r.headers.get("location", "")
             body_preview = r.text[:500] if r.text else ""
             logger.warning(
                 "PROXY DEBUG %s %s → %d | Location: %s | CT: %s | Body: %s",
@@ -126,36 +127,38 @@ async def handle_proxy_request(
                 browser_resp = await browser_pool.get(url)
                 if not _is_challenged_content(browser_resp):
                     status_code = browser_resp.status_code
-                    resp_headers = {"content-type": "text/html; charset=utf-8"}
+                    resp_header_list = [("content-type", "text/html; charset=utf-8")]
                     resp_body = browser_resp.text.encode("utf-8")
                     logger.info("Proxy: %s → %d via browser", url[:80], status_code)
 
         # Remove hop-by-hop and stale encoding headers from response
-        resp_headers = {
-            k: v for k, v in resp_headers.items()
+        resp_header_list = [
+            (k, v) for k, v in resp_header_list
             if k.lower() not in HOP_BY_HOP and k.lower() not in STRIP_RESPONSE_HEADERS
-        }
+        ]
 
         logger.info("PROXY %s %s → %d (%d bytes)", method, url[:80], status_code, len(resp_body))
-        return status_code, resp_headers, resp_body
+        return status_code, resp_header_list, resp_body
 
     except Exception as e:
         logger.error("PROXY %s %s → error: %s", method, url[:80], e)
         error_body = f"502 Bad Gateway: {e}".encode("utf-8")
-        return 502, {"content-type": "text/plain"}, error_body
+        return 502, [("content-type", "text/plain")], error_body
 
 
-def build_http_response(status_code: int, headers: dict[str, str], body: bytes) -> bytes:
-    """Build raw HTTP/1.1 response bytes."""
+def build_http_response(status_code: int, headers: list[tuple[str, str]], body: bytes) -> bytes:
+    """Build raw HTTP/1.1 response bytes.
+
+    headers is a list of (name, value) tuples to preserve duplicates (e.g. Set-Cookie).
+    """
     reason = _status_reason(status_code)
     lines = [f"HTTP/1.1 {status_code} {reason}"]
 
-    # Set content-length
-    headers["content-length"] = str(len(body))
-    headers.pop("transfer-encoding", None)
-
-    for key, value in headers.items():
-        lines.append(f"{key}: {value}")
+    # Filter out transfer-encoding, add content-length
+    for key, value in headers:
+        if key.lower() != "transfer-encoding":
+            lines.append(f"{key}: {value}")
+    lines.append(f"content-length: {len(body)}")
 
     header_block = "\r\n".join(lines) + "\r\n\r\n"
     return header_block.encode("utf-8") + body
