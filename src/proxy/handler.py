@@ -99,9 +99,18 @@ async def handle_proxy_request(
         status_code = r.status_code
         resp_headers = dict(r.headers)
         resp_body = r.content
+        content_type = resp_headers.get("content-type", "")
+
+        # Debug logging for diagnosis
+        if status_code >= 300 or "login" in url.lower() or "auth" in url.lower():
+            location = resp_headers.get("location", resp_headers.get("Location", ""))
+            body_preview = r.text[:500] if r.text else ""
+            logger.warning(
+                "PROXY DEBUG %s %s → %d | Location: %s | CT: %s | Body: %s",
+                method, url[:120], status_code, location, content_type, body_preview[:300]
+            )
 
         # Challenge detection — only for text/html, skip 3xx redirects
-        content_type = resp_headers.get("content-type", "")
         is_redirect = 300 <= status_code < 400
         if "text/html" in content_type and not is_redirect:
             text = r.text[:5000]
