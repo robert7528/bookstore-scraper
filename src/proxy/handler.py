@@ -66,18 +66,22 @@ async def handle_proxy_request(
     clean_headers.pop("Accept-Encoding", None)
 
     try:
+        # Proxy must NOT follow redirects — return 3xx as-is to the client
+        # so HyProxy/browser handles the redirect through the correct tunnel
+        kwargs = {"headers": clean_headers or None, "allow_redirects": False}
+
         if method.upper() == "GET":
-            r = await session.get(url, headers=clean_headers or None)
+            r = await session.get(url, **kwargs)
         elif method.upper() == "POST":
-            r = await session.post(url, headers=clean_headers or None, data=body or None)
+            r = await session.post(url, data=body or None, **kwargs)
         elif method.upper() == "HEAD":
-            r = await session.head(url, headers=clean_headers or None)
+            r = await session.head(url, **kwargs)
         elif method.upper() == "PUT":
-            r = await session.put(url, headers=clean_headers or None, data=body or None)
+            r = await session.put(url, data=body or None, **kwargs)
         elif method.upper() == "DELETE":
-            r = await session.delete(url, headers=clean_headers or None)
+            r = await session.delete(url, **kwargs)
         else:
-            r = await session.get(url, headers=clean_headers or None)
+            r = await session.get(url, **kwargs)
 
         status_code = r.status_code
         resp_headers = dict(r.headers)
