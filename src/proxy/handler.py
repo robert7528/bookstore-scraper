@@ -17,6 +17,12 @@ HOP_BY_HOP = frozenset({
     "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade",
 })
 
+# Headers to strip from response — curl_cffi auto-decompresses, so these are stale
+STRIP_RESPONSE_HEADERS = frozenset({
+    "content-encoding",   # body already decompressed by curl_cffi
+    "content-length",     # will be recalculated from actual body size
+})
+
 
 async def handle_proxy_request(
     method: str,
@@ -51,6 +57,9 @@ async def handle_proxy_request(
     # Remove host header (curl_cffi sets it from URL)
     clean_headers.pop("host", None)
     clean_headers.pop("Host", None)
+    # Remove accept-encoding — let curl_cffi handle its own encoding negotiation
+    clean_headers.pop("accept-encoding", None)
+    clean_headers.pop("Accept-Encoding", None)
 
     try:
         if method.upper() == "GET":
@@ -90,8 +99,11 @@ async def handle_proxy_request(
                     resp_body = browser_resp.text.encode("utf-8")
                     logger.info("Proxy: %s → %d via browser", url[:80], status_code)
 
-        # Remove hop-by-hop from response
-        resp_headers = {k: v for k, v in resp_headers.items() if k.lower() not in HOP_BY_HOP}
+        # Remove hop-by-hop and stale encoding headers from response
+        resp_headers = {
+            k: v for k, v in resp_headers.items()
+            if k.lower() not in HOP_BY_HOP and k.lower() not in STRIP_RESPONSE_HEADERS
+        }
 
         logger.info("PROXY %s %s → %d (%d bytes)", method, url[:80], status_code, len(resp_body))
         return status_code, resp_headers, resp_body
