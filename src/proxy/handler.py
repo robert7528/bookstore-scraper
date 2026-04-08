@@ -28,6 +28,36 @@ STRIP_RESPONSE_HEADERS = frozenset({
 })
 
 
+async def _curl_request(session_mgr: SessionManager, sid: str, method: str, url: str, headers: dict, body: bytes):
+    """Execute curl request, retry once with fresh session if session was closed."""
+    for attempt in range(2):
+        session = session_mgr.get_or_create(sid)
+        # Proxy should NOT manage cookies — HyProxy/browser sends them via headers.
+        session.cookies.clear()
+
+        kwargs = {"headers": headers or None, "allow_redirects": False}
+        try:
+            m = method.upper()
+            if m == "GET":
+                return await session.get(url, **kwargs)
+            elif m == "POST":
+                return await session.post(url, data=body or None, **kwargs)
+            elif m == "HEAD":
+                return await session.head(url, **kwargs)
+            elif m == "PUT":
+                return await session.put(url, data=body or None, **kwargs)
+            elif m == "DELETE":
+                return await session.delete(url, **kwargs)
+            else:
+                return await session.get(url, **kwargs)
+        except Exception as e:
+            if attempt == 0 and "closed" in str(e).lower():
+                logger.warning("Session closed for %s, recreating", sid)
+                session_mgr.remove(sid)
+                continue
+            raise
+
+
 async def handle_proxy_request(
     method: str,
     url: str,
@@ -49,13 +79,6 @@ async def handle_proxy_request(
     domain = parsed.netloc or "unknown"
     sid = f"proxy_{domain}"
 
-    session = session_mgr.get_or_create(sid)
-
-    # Clear session cookie jar — proxy should NOT manage cookies.
-    # HyProxy/browser manages cookies and sends them via request headers.
-    # Dual cookie management (curl_cffi session + HyProxy) causes auth loops.
-    session.cookies.clear()
-
     # Rate limit
     wait_time = await rate_limiter.wait(url)
     if wait_time > 0:
@@ -71,22 +94,7 @@ async def handle_proxy_request(
     clean_headers.pop("Accept-Encoding", None)
 
     try:
-        # Proxy must NOT follow redirects — return 3xx as-is to the client
-        # so HyProxy/browser handles the redirect through the correct tunnel
-        kwargs = {"headers": clean_headers or None, "allow_redirects": False}
-
-        if method.upper() == "GET":
-            r = await session.get(url, **kwargs)
-        elif method.upper() == "POST":
-            r = await session.post(url, data=body or None, **kwargs)
-        elif method.upper() == "HEAD":
-            r = await session.head(url, **kwargs)
-        elif method.upper() == "PUT":
-            r = await session.put(url, data=body or None, **kwargs)
-        elif method.upper() == "DELETE":
-            r = await session.delete(url, **kwargs)
-        else:
-            r = await session.get(url, **kwargs)
+        r = await _curl_request(session_mgr, sid, method, url, clean_headers, body)
 
         status_code = r.status_code
         resp_headers = dict(r.headers)

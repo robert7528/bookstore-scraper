@@ -37,6 +37,12 @@ class SessionManager:
         logger.info("Created session: %s (total: %d)", session_id, len(self._sessions))
         return session
 
+    def remove(self, session_id: str) -> None:
+        """Remove a session without awaiting close (for already-closed sessions)."""
+        if session_id in self._sessions:
+            self._sessions.pop(session_id)
+            logger.info("Removed stale session: %s", session_id)
+
     async def close(self, session_id: str) -> bool:
         if session_id in self._sessions:
             session, _ = self._sessions.pop(session_id)
