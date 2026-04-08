@@ -17,10 +17,14 @@ HOP_BY_HOP = frozenset({
     "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade",
 })
 
-# Headers to strip from response — curl_cffi auto-decompresses, so these are stale
+# Headers to strip from response
 STRIP_RESPONSE_HEADERS = frozenset({
-    "content-encoding",   # body already decompressed by curl_cffi
-    "content-length",     # will be recalculated from actual body size
+    "content-encoding",                  # body already decompressed by curl_cffi
+    "content-length",                    # will be recalculated from actual body size
+    "content-security-policy",           # CSP blocks resources when accessed via proxy domain
+    "content-security-policy-report-only",
+    "strict-transport-security",         # HSTS for original domain, not applicable via proxy
+    "x-frame-options",                   # may block embedding through proxy
 })
 
 
