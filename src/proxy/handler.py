@@ -28,12 +28,23 @@ STRIP_RESPONSE_HEADERS = frozenset({
 })
 
 
+def _is_cf_cookie(set_cookie_value: str) -> bool:
+    """Check if a Set-Cookie header is a Cloudflare cookie."""
+    name = set_cookie_value.split("=", 1)[0].strip().lower()
+    return name.startswith("__cf") or name == "cf_clearance"
+
+
 async def _curl_request(session_mgr: SessionManager, sid: str, method: str, url: str, headers: dict, body: bytes):
     """Execute curl request, retry once with fresh session if session was closed."""
     for attempt in range(2):
         session = session_mgr.get_or_create(sid)
-        # Proxy should NOT manage cookies — HyProxy/browser sends them via headers.
-        session.cookies.clear()
+        # Clear non-CF cookies — HyProxy/browser manages those via headers.
+        # Keep CF cookies (__cf_bm, cf_clearance) in session so curl_cffi
+        # handles them directly, preventing HyProxy cookie-domain rewrite
+        # from merging different sites' CF tokens and causing conflicts.
+        for name in list(session.cookies.keys()):
+            if not name.startswith("__cf") and not name.startswith("cf_clearance"):
+                session.cookies.delete(name)
 
         kwargs = {"headers": headers or None, "allow_redirects": False}
         try:
@@ -131,10 +142,15 @@ async def handle_proxy_request(
                     resp_body = browser_resp.text.encode("utf-8")
                     logger.info("Proxy: %s → %d via browser", url[:80], status_code)
 
-        # Remove hop-by-hop and stale encoding headers from response
+        # Remove hop-by-hop, stale encoding headers, and CF cookies from response.
+        # CF cookies (__cf_bm, cf_clearance) are managed by curl_cffi session
+        # and must NOT be forwarded to HyProxy — its cookie-domain rewrite
+        # merges them across sites, causing Cloudflare token conflicts.
         resp_header_list = [
             (k, v) for k, v in resp_header_list
-            if k.lower() not in HOP_BY_HOP and k.lower() not in STRIP_RESPONSE_HEADERS
+            if k.lower() not in HOP_BY_HOP
+            and k.lower() not in STRIP_RESPONSE_HEADERS
+            and not (k.lower() == "set-cookie" and _is_cf_cookie(v))
         ]
 
         logger.info("PROXY %s %s → %d (%d bytes)", method, url[:80], status_code, len(resp_body))
