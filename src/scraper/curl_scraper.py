@@ -52,7 +52,7 @@ class CurlScraper(BaseScraper):
     """curl_cffi based scraper — TLS fingerprint impersonation to bypass Bot Fight Mode."""
 
     def __init__(self, *, impersonate: str = DEFAULT_IMPERSONATE, timeout: int = DEFAULT_TIMEOUT):
-        self._session = AsyncSession(impersonate=impersonate, timeout=timeout)
+        self._session = AsyncSession(impersonate=impersonate, timeout=timeout, verify=False)
 
     def _wrap(self, r) -> Response:
         return Response(

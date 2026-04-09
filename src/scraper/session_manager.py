@@ -32,7 +32,7 @@ class SessionManager:
             logger.debug("Reusing session: %s", session_id)
             return session
 
-        session = AsyncSession(impersonate=impersonate, timeout=timeout)
+        session = AsyncSession(impersonate=impersonate, timeout=timeout, verify=False)
         self._sessions[session_id] = (session, time.time())
         logger.info("Created session: %s (total: %d)", session_id, len(self._sessions))
         return session
