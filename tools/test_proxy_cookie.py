@@ -22,8 +22,20 @@ import os
 # 加入 src 路徑
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.proxy.tls import ensure_cert
 from curl_cffi.requests import AsyncSession
+
+
+def ensure_cert(cert_file, key_file):
+    """自動產生自簽憑證"""
+    if os.path.exists(cert_file) and os.path.exists(key_file):
+        return
+    import subprocess
+    subprocess.run([
+        "openssl", "req", "-x509", "-newkey", "rsa:2048",
+        "-keyout", key_file, "-out", cert_file,
+        "-days", "365", "-nodes",
+        "-subj", "/CN=test-proxy"
+    ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("test-proxy")
