@@ -30,8 +30,9 @@ def get_cookies(host, path):
     try:
         result = subprocess.run(
             ["curl", "-k", "-sD", "-", "-o", "/dev/null", url],
-            capture_output=True, text=True, timeout=30
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30
         )
+        result.stdout = result.stdout.decode("utf-8", errors="replace")
         cookies = []
         for line in result.stdout.split("\n"):
             if line.lower().startswith("set-cookie:"):
