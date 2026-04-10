@@ -8,11 +8,13 @@ from ..config.settings import get as cfg
 from ..rate_limiter import DomainRateLimiter
 from ..scraper.engine import _is_challenged_content, CHALLENGE_SIGNS
 from ..scraper.session_manager import SessionManager
-from .jcr_browser import jcr_browser
 
 # Proxy has its own rate limiter (default 0 = no limit)
 _proxy_rate_interval = cfg("proxy.rate_limit_interval", 0)
 proxy_rate_limiter = DomainRateLimiter(_proxy_rate_interval)
+
+# JCR browser fetch mode — for NAT pool environments where outgoing IP is unstable
+_browser_fetch_enabled = cfg("proxy.browser_fetch", False)
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +76,10 @@ async def _curl_request(session_mgr: SessionManager, sid: str, method: str, url:
             raise
 
 
-def _is_jcr_api(domain: str, url: str) -> bool:
-    """Check if this is a JCR API request that needs browser auth."""
+def _needs_browser_fetch(domain: str, url: str) -> bool:
+    """Check if this request should go through browser fetch (NAT pool workaround)."""
+    if not _browser_fetch_enabled:
+        return False
     return domain == "jcr.clarivate.com" and "/api/" in url
 
 
@@ -89,9 +93,15 @@ async def handle_proxy_request(
 ) -> tuple[int, list[tuple[str, str]], bytes]:
     """Execute proxied request via curl_cffi and return (status, headers, body_bytes).
 
-    JCR API requests are routed through a persistent browser session
-    to maintain IP consistency for Clarivate's IP-based auth.
-    All other requests use curl_cffi.
+    Flow:
+    1. Get/create session per domain (reuses cookies)
+    2. Rate limit per domain
+    3. Execute via curl_cffi AsyncSession
+    4. If HTML + challenged → browser fallback
+    5. Return complete response
+
+    If proxy.browser_fetch=true, JCR API requests are routed through a
+    persistent browser session to maintain IP consistency (NAT pool workaround).
     """
     parsed = urlparse(url)
     domain = parsed.netloc or "unknown"
@@ -111,16 +121,15 @@ async def handle_proxy_request(
     clean_headers.pop("accept-encoding", None)
     clean_headers.pop("Accept-Encoding", None)
 
-    # JCR API → route through persistent browser session
-    if _is_jcr_api(domain, url):
+    # JCR API via browser fetch (NAT pool workaround, off by default)
+    if _needs_browser_fetch(domain, url):
+        from .jcr_browser import jcr_browser
         logger.info("JCR API %s %s → browser fetch", method, url[:80])
         try:
             status, resp_headers, resp_body = await jcr_browser.fetch(
                 method, url, clean_headers, body
             )
-            # Convert headers dict to list of tuples
             resp_header_list = [(k, v) for k, v in resp_headers.items()]
-            # Strip problematic headers
             resp_header_list = [
                 (k, v) for k, v in resp_header_list
                 if k.lower() not in STRIP_RESPONSE_HEADERS
@@ -130,7 +139,6 @@ async def handle_proxy_request(
             return status, resp_header_list, resp_body
         except Exception as e:
             logger.error("JCR browser fetch failed: %s, falling back to curl", e)
-            # Fall through to curl_cffi
 
     try:
         r = await _curl_request(session_mgr, sid, method, url, clean_headers, body)

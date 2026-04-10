@@ -48,6 +48,9 @@ proxy:
   # 自簽憑證（CONNECT MitM 用，不存在時自動產生）
   cert_file: "configs/proxy-cert.pem"
   key_file: "configs/proxy-key.pem"
+  # JCR API 走瀏覽器 fetch（解決 NAT pool IP 不固定導致 session 失效的問題）
+  # 固定 IP 環境不需要開啟，靠 HyProxy 正常 auth flow + CF cookie 過濾即可
+  browser_fetch: false
   # 不需要 MitM 的 domain（走透明轉發，保持 HyProxy 原始 TLS/cookie）
   # 預設所有 CONNECT 都走 MitM + curl_cffi（繞過 CF TLS 偵測）
   # 只有這裡列的 domain 走透明轉發（適用於 MitM 會造成問題的 domain）
