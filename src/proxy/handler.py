@@ -54,11 +54,15 @@ async def _curl_request(session_mgr: SessionManager, sid: str, method: str, url:
         session = session_mgr.get_or_create(sid)
         # Clear non-CF, non-auth cookies — HyProxy/browser manages those via headers.
         # Keep CF cookies (__cf_bm, cf_clearance) and Clarivate auth cookies
-        # (IC2_SID, PSSID, etc.) in session.
+        # (IC2_SID, PSSID, etc.) in session — don't clear them.
+        keep = set()
         for name in list(session.cookies.keys()):
-            if (not name.startswith("__cf")
-                    and not name.startswith("cf_clearance")
-                    and name not in AUTH_COOKIE_NAMES):
+            if (name.startswith("__cf")
+                    or name.startswith("cf_clearance")
+                    or name in AUTH_COOKIE_NAMES):
+                keep.add(name)
+        for name in list(session.cookies.keys()):
+            if name not in keep:
                 session.cookies.delete(name)
 
         kwargs = {"headers": headers or None, "allow_redirects": False}
@@ -139,10 +143,11 @@ async def handle_proxy_request(
                 clean_headers["Cookie"] = f"{existing}; {auth_pairs}"
             else:
                 clean_headers["Cookie"] = auth_pairs
-            # Also set in session for curl_cffi
+            # Also set in session for curl_cffi (both generic and domain-specific)
             session = session_mgr.get_or_create(sid)
             for k, v in cached.items():
                 session.cookies.set(k, v, domain=".clarivate.com")
+                session.cookies.set(k, v, domain=domain)
 
     try:
         r = await _curl_request(session_mgr, sid, method, url, clean_headers, body)
@@ -174,6 +179,7 @@ async def handle_proxy_request(
                     session = session_mgr.get_or_create(sid)
                     for k, v in cached.items():
                         session.cookies.set(k, v, domain=".clarivate.com")
+                        session.cookies.set(k, v, domain=domain)
                     r = await _curl_request(session_mgr, sid, method, url, clean_headers, body)
                     status_code = r.status_code
                     resp_header_list = list(r.headers.multi_items())

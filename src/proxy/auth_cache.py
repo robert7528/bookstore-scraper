@@ -139,15 +139,13 @@ def _browser_auth_sync() -> dict[str, str] | None:
 
             if "IC2_SID" in cookie_dict:
                 logger.info("Browser: auth completed, got IC2_SID")
-                # Extract auth cookies
+                # Extract auth cookies — keep values as-is (including quotes)
                 auth_cookies = {}
                 for c in cookies:
                     if c["name"] in AUTH_COOKIE_NAMES:
-                        # Strip surrounding quotes if present
-                        val = c["value"]
-                        if val.startswith('"') and val.endswith('"'):
-                            val = val[1:-1]
-                        auth_cookies[c["name"]] = val
+                        auth_cookies[c["name"]] = c["value"]
+                        logger.debug("  cookie: %s = %s (domain: %s)",
+                                     c["name"], c["value"][:30], c.get("domain", ""))
                 return auth_cookies
 
             url = driver.current_url
