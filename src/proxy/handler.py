@@ -173,12 +173,16 @@ async def handle_proxy_request(
         # CF cookies (__cf_bm, cf_clearance) are managed by curl_cffi session
         # and must NOT be forwarded to HyProxy — its cookie-domain rewrite
         # merges them across sites, causing Cloudflare token conflicts.
-        resp_header_list = [
-            (k, v) for k, v in resp_header_list
-            if k.lower() not in HOP_BY_HOP
-            and k.lower() not in STRIP_RESPONSE_HEADERS
-            and not (k.lower() == "set-cookie" and _is_cf_cookie(v))
-        ]
+        filtered = []
+        for k, v in resp_header_list:
+            if k.lower() in HOP_BY_HOP or k.lower() in STRIP_RESPONSE_HEADERS:
+                continue
+            if k.lower() == "set-cookie" and _is_cf_cookie(v):
+                cookie_name = v.split("=", 1)[0].strip()
+                logger.info("CF cookie filtered: %s from %s", cookie_name, url[:80])
+                continue
+            filtered.append((k, v))
+        resp_header_list = filtered
 
         logger.info("PROXY %s %s → %d (%d bytes)", method, url[:80], status_code, len(resp_body))
         return status_code, resp_header_list, resp_body
