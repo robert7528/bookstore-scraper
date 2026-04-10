@@ -218,29 +218,81 @@ class JCRBrowserSession:
         logger.info("JCR browser started (headless=%s)", headless)
 
     def _authenticate_sync(self):
-        """Navigate to JCR and complete IP-based auth."""
+        """Navigate to JCR and wait for full auth + session establishment.
+
+        The JCR auth flow:
+        1. Browser loads jcr.clarivate.com → APIs return 500
+        2. JCR SPA redirects to login.incites → access.clarivate.com
+        3. Angular app does IP auth → platform cookies (IC2_SID) set
+        4. Redirect back to jcr.clarivate.com
+        5. JCR SPA detects platform cookies → establishes JCR session
+        6. APIs return 200
+
+        We must wait for step 6, not just step 3.
+        """
         logger.info("JCR browser: authenticating via jcr.clarivate.com...")
         self._driver.get("https://jcr.clarivate.com/jcr/home")
 
-        # Wait for IC2_SID cookie (IP auth completed)
+        # Phase 1: Wait for IC2_SID cookie (platform auth)
         deadline = time.time() + 60
+        got_ic2 = False
         while time.time() < deadline:
             time.sleep(2)
             cookies = {c["name"]: c["value"] for c in self._driver.get_cookies()}
             if "IC2_SID" in cookies:
-                logger.info("JCR browser: IP auth completed (IC2_SID obtained)")
-                self._authenticated = True
-                self._last_used = time.time()
-                return
-
+                logger.info("JCR browser: platform auth completed (IC2_SID)")
+                got_ic2 = True
+                break
             url = self._driver.current_url
-            logger.debug("JCR browser: waiting for auth... %s", url[:60])
+            logger.debug("JCR browser: waiting for IC2_SID... %s", url[:60])
 
-        logger.warning("JCR browser: auth timed out after 60s")
-        try:
-            self._driver.save_screenshot("/tmp/jcr_auth_debug.png")
-        except Exception:
-            pass
+        if not got_ic2:
+            logger.warning("JCR browser: IC2_SID timeout after 60s")
+            try:
+                self._driver.save_screenshot("/tmp/jcr_auth_debug.png")
+            except Exception:
+                pass
+            return
+
+        # Phase 2: Wait for JCR SPA to establish session
+        # The SPA needs to load on jcr.clarivate.com and call its internal
+        # session setup. We verify by calling session-details via fetch().
+        logger.info("JCR browser: waiting for JCR session to establish...")
+        deadline2 = time.time() + 30
+        while time.time() < deadline2:
+            time.sleep(3)
+            # Check if we're back on jcr.clarivate.com
+            url = self._driver.current_url
+            if "jcr.clarivate.com" not in url:
+                logger.debug("JCR browser: still in login flow... %s", url[:60])
+                continue
+
+            # Try fetching session-details from within the browser
+            try:
+                result = self._driver.execute_async_script("""
+                    var cb = arguments[arguments.length - 1];
+                    fetch('https://jcr.clarivate.com/api/jcr3/bwjournal/v1/session-details', {
+                        credentials: 'include',
+                        headers: {'Accept': 'application/json'}
+                    })
+                    .then(function(r) { cb({status: r.status}); })
+                    .catch(function(e) { cb({status: 0, error: e.toString()}); });
+                """)
+                status = result.get("status", 0) if result else 0
+                logger.info("JCR browser: session-details test → %d", status)
+                if status == 200:
+                    logger.info("JCR browser: session fully established!")
+                    self._authenticated = True
+                    self._last_used = time.time()
+                    return
+            except Exception as e:
+                logger.debug("JCR browser: session test error: %s", e)
+
+        # If we got IC2_SID but session-details still fails,
+        # mark as authenticated anyway — fetch() will try
+        logger.warning("JCR browser: session-details not 200, proceeding with IC2_SID only")
+        self._authenticated = True
+        self._last_used = time.time()
 
     def _close_sync(self):
         """Close Chrome."""
