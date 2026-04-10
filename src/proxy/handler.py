@@ -8,10 +8,14 @@ from ..config.settings import get as cfg
 from ..rate_limiter import DomainRateLimiter
 from ..scraper.engine import _is_challenged_content, CHALLENGE_SIGNS
 from ..scraper.session_manager import SessionManager
+from .auth_cache import auth_cache, AUTH_COOKIE_NAMES
 
 # Proxy has its own rate limiter (default 0 = no limit)
 _proxy_rate_interval = cfg("proxy.rate_limit_interval", 0)
 proxy_rate_limiter = DomainRateLimiter(_proxy_rate_interval)
+
+# Domains that need Clarivate auth cookies
+_JCR_API_DOMAINS = {"jcr.clarivate.com"}
 
 logger = logging.getLogger(__name__)
 
@@ -38,16 +42,23 @@ def _is_cf_cookie(set_cookie_value: str) -> bool:
     return name.startswith("__cf") or name == "cf_clearance"
 
 
+def _is_auth_cookie(set_cookie_value: str) -> bool:
+    """Check if a Set-Cookie header is a Clarivate auth cookie we manage."""
+    name = set_cookie_value.split("=", 1)[0].strip()
+    return name in AUTH_COOKIE_NAMES
+
+
 async def _curl_request(session_mgr: SessionManager, sid: str, method: str, url: str, headers: dict, body: bytes):
     """Execute curl request, retry once with fresh session if session was closed."""
     for attempt in range(2):
         session = session_mgr.get_or_create(sid)
-        # Clear non-CF cookies — HyProxy/browser manages those via headers.
-        # Keep CF cookies (__cf_bm, cf_clearance) in session so curl_cffi
-        # handles them directly, preventing HyProxy cookie-domain rewrite
-        # from merging different sites' CF tokens and causing conflicts.
+        # Clear non-CF, non-auth cookies — HyProxy/browser manages those via headers.
+        # Keep CF cookies (__cf_bm, cf_clearance) and Clarivate auth cookies
+        # (IC2_SID, PSSID, etc.) in session.
         for name in list(session.cookies.keys()):
-            if not name.startswith("__cf") and not name.startswith("cf_clearance"):
+            if (not name.startswith("__cf")
+                    and not name.startswith("cf_clearance")
+                    and name not in AUTH_COOKIE_NAMES):
                 session.cookies.delete(name)
 
         kwargs = {"headers": headers or None, "allow_redirects": False}
@@ -116,6 +127,23 @@ async def handle_proxy_request(
             method, url[:120], cookie_header[:300]
         )
 
+    # Inject Clarivate auth cookies for JCR API domains
+    needs_auth = domain in _JCR_API_DOMAINS
+    if needs_auth:
+        cached = auth_cache.cookies
+        if cached:
+            # Merge auth cookies into Cookie header
+            existing = clean_headers.get("Cookie", clean_headers.get("cookie", ""))
+            auth_pairs = "; ".join(f"{k}={v}" for k, v in cached.items())
+            if existing:
+                clean_headers["Cookie"] = f"{existing}; {auth_pairs}"
+            else:
+                clean_headers["Cookie"] = auth_pairs
+            # Also set in session for curl_cffi
+            session = session_mgr.get_or_create(sid)
+            for k, v in cached.items():
+                session.cookies.set(k, v, domain=".clarivate.com")
+
     try:
         r = await _curl_request(session_mgr, sid, method, url, clean_headers, body)
 
@@ -133,6 +161,29 @@ async def handle_proxy_request(
                 "PROXY DEBUG %s %s → %d | Location: %s | CT: %s | Body: %s",
                 method, url[:120], status_code, location, content_type, body_preview[:300]
             )
+
+        # JCR auth: if API returns 401/500 with empty body, try browser auth
+        if needs_auth and status_code in (401, 500) and len(resp_body) == 0:
+            if "/api/" in url and not auth_cache.has_valid_cookies:
+                logger.warning("JCR API %s → %d, triggering browser auth", url[:80], status_code)
+                cached = await auth_cache.ensure_auth()
+                if cached:
+                    # Retry with auth cookies
+                    auth_pairs = "; ".join(f"{k}={v}" for k, v in cached.items())
+                    clean_headers["Cookie"] = auth_pairs
+                    session = session_mgr.get_or_create(sid)
+                    for k, v in cached.items():
+                        session.cookies.set(k, v, domain=".clarivate.com")
+                    r = await _curl_request(session_mgr, sid, method, url, clean_headers, body)
+                    status_code = r.status_code
+                    resp_header_list = list(r.headers.multi_items())
+                    resp_body = r.content
+                    content_type = r.headers.get("content-type", "")
+                    logger.info("JCR API retry %s → %d (%d bytes)", url[:80], status_code, len(resp_body))
+            elif "/api/" in url and auth_cache.has_valid_cookies:
+                # Auth cookies exist but still 401/500 → cookies may be expired
+                logger.warning("JCR API %s → %d with cached auth, invalidating", url[:80], status_code)
+                auth_cache.invalidate()
 
         # Challenge detection — only for text/html, skip 3xx redirects
         is_redirect = 300 <= status_code < 400
@@ -163,6 +214,7 @@ async def handle_proxy_request(
             if k.lower() not in HOP_BY_HOP
             and k.lower() not in STRIP_RESPONSE_HEADERS
             and not (k.lower() == "set-cookie" and _is_cf_cookie(v))
+            and not (k.lower() == "set-cookie" and _is_auth_cookie(v))
         ]
 
         logger.info("PROXY %s %s → %d (%d bytes)", method, url[:80], status_code, len(resp_body))
