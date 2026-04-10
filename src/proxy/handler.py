@@ -5,9 +5,13 @@ import logging
 from urllib.parse import urlparse
 
 from ..config.settings import get as cfg
-from ..rate_limiter import rate_limiter
+from ..rate_limiter import DomainRateLimiter
 from ..scraper.engine import _is_challenged_content, CHALLENGE_SIGNS
 from ..scraper.session_manager import SessionManager
+
+# Proxy has its own rate limiter (default 0 = no limit)
+_proxy_rate_interval = cfg("proxy.rate_limit_interval", 0)
+proxy_rate_limiter = DomainRateLimiter(_proxy_rate_interval)
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +94,8 @@ async def handle_proxy_request(
     domain = parsed.netloc or "unknown"
     sid = f"proxy_{domain}"
 
-    # Rate limit
-    wait_time = await rate_limiter.wait(url)
+    # Rate limit (proxy uses its own interval, default 0 = no limit)
+    wait_time = await proxy_rate_limiter.wait(url)
     if wait_time > 0:
         logger.info("Proxy rate limited %.2fs for %s", wait_time, url[:80])
 
