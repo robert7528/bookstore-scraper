@@ -104,6 +104,14 @@ async def handle_proxy_request(
     clean_headers.pop("accept-encoding", None)
     clean_headers.pop("Accept-Encoding", None)
 
+    # Debug: log incoming Cookie header for diagnosis
+    cookie_header = headers.get("cookie", headers.get("Cookie", ""))
+    if cookie_header and ("jcr" in domain or "clarivate" in domain):
+        logger.warning(
+            "PROXY DEBUG REQ %s %s | Cookie: %s",
+            method, url[:120], cookie_header[:300]
+        )
+
     try:
         r = await _curl_request(session_mgr, sid, method, url, clean_headers, body)
 
