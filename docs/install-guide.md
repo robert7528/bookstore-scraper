@@ -223,6 +223,103 @@ git pull
 systemctl restart bookstore-scraper
 ```
 
+## 監控設定
+
+### 安裝監控腳本
+
+```bash
+# 建立目錄
+mkdir -p /opt/bookstore-scraper/logs
+
+# Cookie 監控腳本
+cat > /opt/bookstore-scraper/tools/monitor_cookies.sh << 'EOF'
+#!/bin/bash
+DATE=$(date '+%Y-%m-%d %H:%M')
+LOGDIR=/opt/bookstore-scraper/logs
+LOGFILE=$LOGDIR/cookie_monitor.$(date '+%Y%m').log
+mkdir -p $LOGDIR
+
+DB_SIZE=$(redis-cli -n 9 DBSIZE | awk '{print $2}')
+JCR_KEYS=$(redis-cli -n 9 keys "*jcr*" 2>/dev/null | wc -l)
+
+CF_COOKIE=0
+SESSIONS=$(redis-cli -n 9 keys "session_*" 2>/dev/null)
+if [ -n "$SESSIONS" ]; then
+    for k in $SESSIONS; do
+        if redis-cli -n 9 get "$k" 2>/dev/null | grep -q "__cf_bm"; then
+            CF_COOKIE=$((CF_COOKIE+1))
+        fi
+    done
+fi
+
+echo "$DATE | Redis keys: $DB_SIZE | JCR cache: $JCR_KEYS | CF in session: $CF_COOKIE" >> $LOGFILE
+[ "$CF_COOKIE" -gt 0 ] && echo "$DATE | WARNING: CF cookie in session!" >> $LOGFILE
+find $LOGDIR -name "cookie_monitor.*.log" -mtime +90 -delete 2>/dev/null
+EOF
+
+# Proxy 監控腳本
+cat > /opt/bookstore-scraper/tools/monitor_proxy.sh << 'EOF'
+#!/bin/bash
+DATE=$(date '+%Y-%m-%d %H:%M')
+LOGDIR=/opt/bookstore-scraper/logs
+LOGFILE=$LOGDIR/proxy_monitor.$(date '+%Y%m').log
+mkdir -p $LOGDIR
+
+if systemctl is-active bookstore-scraper &>/dev/null; then
+    STATUS="running"
+    MEM=$(systemctl status bookstore-scraper 2>/dev/null | grep Memory | awk '{print $2}')
+else
+    STATUS="stopped"
+    MEM="0"
+fi
+
+LOGS=$(journalctl -u bookstore-scraper --since "1 hour ago" --no-pager 2>/dev/null)
+CF_FILTERED=$(echo "$LOGS" | grep -c "CF cookie filtered")
+JS_PATCHED=$(echo "$LOGS" | grep -c "Patched")
+JCR_200=$(echo "$LOGS" | grep "session-details" | grep -c "200")
+JCR_500=$(echo "$LOGS" | grep "session-details" | grep -c "500")
+ERRORS=$(echo "$LOGS" | grep -c "ERROR")
+
+echo "$DATE | status=$STATUS mem=$MEM | CF_filtered=$CF_FILTERED JS_patched=$JS_PATCHED JCR_200=$JCR_200 JCR_500=$JCR_500 errors=$ERRORS" >> $LOGFILE
+[ "$STATUS" != "running" ] && echo "$DATE | ALERT: service not running!" >> $LOGFILE
+find $LOGDIR -name "proxy_monitor.*.log" -mtime +90 -delete 2>/dev/null
+EOF
+
+chmod +x /opt/bookstore-scraper/tools/monitor_cookies.sh
+chmod +x /opt/bookstore-scraper/tools/monitor_proxy.sh
+```
+
+### 設定排程
+
+```bash
+# 每小時執行一次
+(crontab -l 2>/dev/null | grep -v "monitor_cookies" | grep -v "monitor_proxy"; \
+ echo "0 * * * * /opt/bookstore-scraper/tools/monitor_cookies.sh"; \
+ echo "0 * * * * /opt/bookstore-scraper/tools/monitor_proxy.sh") | crontab -
+
+# 確認排程
+crontab -l | grep monitor
+```
+
+### 驗證監控
+
+```bash
+# 手動執行一次
+/opt/bookstore-scraper/tools/monitor_cookies.sh && /opt/bookstore-scraper/tools/monitor_proxy.sh
+
+# 查看結果
+tail -1 /opt/bookstore-scraper/logs/cookie_monitor.$(date '+%Y%m').log
+tail -1 /opt/bookstore-scraper/logs/proxy_monitor.$(date '+%Y%m').log
+```
+
+Log 按月分檔，保留 3 個月：
+```
+logs/
+├── cookie_monitor.202604.log    ← Redis 狀態 + CF cookie 檢查
+├── proxy_monitor.202604.log     ← 服務狀態 + CF 過濾 + JCR auth 統計
+└── ...（超過 90 天自動刪除）
+```
+
 ## 驗證工具
 
 ```bash
@@ -240,7 +337,8 @@ bash tools/analyze_access_js.sh
 
 | 問題 | 原因 | 解法 |
 |------|------|------|
-| JCR login loop | NAT pool 導致出口 IP 不固定 | 固定出口 IP |
+| JCR login loop（by Domain）| Angular app domain 誤判 + CF cookie 累積 | 部署 proxy（自動修正 Angular + 過濾 CF cookie）|
+| JCR login loop（by Port）| CF cookie 長期累積 | 部署 proxy（過濾 CF cookie）|
 | Chrome 啟動失敗 | 缺 X11/dbus 依賴 | 安裝 dbus-x11 + Xvfb |
 | Conda TOS 錯誤 | 新版 Conda 需接受 TOS | `conda tos accept` |
 | 學校防火牆擋 port | 只開放 80/443 | 用 nginx 反代 |
