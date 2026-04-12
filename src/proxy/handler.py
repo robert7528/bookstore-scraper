@@ -169,6 +169,21 @@ async def handle_proxy_request(
                     resp_body = browser_resp.text.encode("utf-8")
                     logger.info("Proxy: %s → %d via browser", url[:80], status_code)
 
+        # Fix Clarivate Angular app domain detection for HyProxy by-domain mode.
+        # The Angular app checks l_access=["access.","access-"] to detect if it's
+        # running on an access.clarivate.com subdomain. In HyProxy by-domain mode,
+        # the hostname is "access-clarivate-com.xxx.edu.tw" which contains "access-"
+        # and triggers detectSession logic that fails → login loop.
+        # Fix: change the check to only match exact Clarivate domains.
+        if (domain == "access.clarivate.com"
+                and "javascript" in content_type
+                and b'l_access=["access.","access-"]' in resp_body):
+            resp_body = resp_body.replace(
+                b'l_access=["access.","access-"]',
+                b'l_access=["access.clarivate.com","__noop__"]'
+            )
+            logger.info("Patched access.clarivate.com Angular domain detection for %s", url[:80])
+
         # Remove hop-by-hop, stale encoding headers, and CF cookies from response.
         # CF cookies (__cf_bm, cf_clearance) are managed by curl_cffi session
         # and must NOT be forwarded to HyProxy — its cookie-domain rewrite
