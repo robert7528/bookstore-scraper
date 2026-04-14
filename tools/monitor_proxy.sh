@@ -20,7 +20,7 @@ CF_FILTERED=$(echo "$LOGS" | grep -c "CF cookie filtered")
 JS_PATCHED=$(echo "$LOGS" | grep -c "Patched")
 JCR_200=$(echo "$LOGS" | grep "session-details" | grep -c "200")
 JCR_500=$(echo "$LOGS" | grep "session-details" | grep -c "500")
-ERRORS=$(echo "$LOGS" | grep -c "ERROR")
+ERRORS=$(echo "$LOGS" | grep "ERROR" | grep -v "Task was destroyed but it is pending" | grep -c "ERROR")
 
 echo "$DATE | status=$STATUS mem=$MEM | CF_filtered=$CF_FILTERED JS_patched=$JS_PATCHED JCR_200=$JCR_200 JCR_500=$JCR_500 errors=$ERRORS" >> $LOGFILE
 [ "$STATUS" != "running" ] && echo "$DATE | ALERT: service not running!" >> $LOGFILE

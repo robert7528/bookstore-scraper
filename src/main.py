@@ -21,6 +21,10 @@ from .sites.runner import run_search
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Suppress noisy asyncio "Task was destroyed but it is pending" warnings
+# from MitM proxy tunnel cleanup — harmless, but floods the log
+logging.getLogger("asyncio").setLevel(logging.CRITICAL)
+
 session_mgr = SessionManager()
 _browser_pool = None
 
