@@ -306,6 +306,12 @@ async def list_sessions():
     return {"sessions": session_mgr.list_sessions()}
 
 
+@app.get("/sessions/cookies")
+async def list_sessions_cookies():
+    """列出所有活躍 session 及其 cookie 內容（debug 用）。"""
+    return {"sessions": session_mgr.list_sessions_with_cookies()}
+
+
 # --- Existing endpoints ---
 
 @app.get("/")

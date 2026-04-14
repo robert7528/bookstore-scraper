@@ -62,6 +62,25 @@ class SessionManager:
             for sid, (_, ts) in self._sessions.items()
         ]
 
+    def list_sessions_with_cookies(self) -> list[dict]:
+        """列出所有 session 及其 cookie 內容。"""
+        now = time.time()
+        result = []
+        for sid, (session, ts) in self._sessions.items():
+            cookies = {}
+            for cookie in session.cookies.jar:
+                cookies[cookie.name] = {
+                    "value": cookie.value[:60] + "..." if len(cookie.value) > 60 else cookie.value,
+                    "domain": cookie.domain,
+                    "path": cookie.path,
+                }
+            result.append({
+                "session_id": sid,
+                "age": round(now - ts, 1),
+                "cookies": cookies,
+            })
+        return result
+
     def _cleanup_expired(self) -> None:
         import asyncio
         now = time.time()
