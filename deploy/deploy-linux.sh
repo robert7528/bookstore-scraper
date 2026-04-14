@@ -49,15 +49,23 @@ fi
 echo ""
 echo "=== [2/9] Install Python 3.11 ==="
 
-PY_VER=$(python3 --version 2>/dev/null | awk '{print $2}' | cut -d. -f1,2)
-if [ "$(echo "$PY_VER < 3.11" | bc 2>/dev/null)" = "1" ] || [ -z "$PY_VER" ]; then
-    info "System Python $PY_VER too old, installing Conda..."
+PY_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)" 2>/dev/null || echo "0")
+PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "0")
+NEED_CONDA=false
+[ "$PY_MAJOR" -lt 3 ] && NEED_CONDA=true
+[ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 11 ] && NEED_CONDA=true
+
+if $NEED_CONDA; then
+    info "System Python ${PY_MAJOR}.${PY_MINOR} too old, installing Conda..."
 
     if [ ! -d /opt/miniconda3 ]; then
-        curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o /tmp/miniconda.sh
+        curl -fsSLk https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o /tmp/miniconda.sh
         bash /tmp/miniconda.sh -b -p /opt/miniconda3
         rm -f /tmp/miniconda.sh
     fi
+
+    # Disable SSL verify (校園 SSL inspection 環境)
+    /opt/miniconda3/bin/conda config --set ssl_verify false 2>/dev/null || true
 
     # Accept TOS (required for Conda 2025+)
     /opt/miniconda3/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main 2>/dev/null || true
@@ -150,7 +158,10 @@ if [ ! -d "$APP_DIR/.venv" ]; then
     $PYTHON -m venv .venv
     info "Created venv"
 fi
-.venv/bin/pip install -e ".[undetected]" --quiet
+PIP_TRUSTED="--trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org"
+.venv/bin/pip install --upgrade pip --quiet $PIP_TRUSTED
+info "pip upgraded: $(.venv/bin/pip --version)"
+.venv/bin/pip install -e ".[undetected]" --quiet $PIP_TRUSTED
 info "Dependencies installed"
 
 # --- [6/9] Configure settings ---

@@ -9,6 +9,26 @@
 - **RAM**: 最低 512MB，建議 1GB+
 - **Port**: 8101 (fetch API)、8102 (forward proxy)
 
+## SSL Inspection 環境（學校/企業常見）
+
+很多學校、企業的網路會做 HTTPS inspection（中間人 SSL），導致 pip、conda、curl 全部 SSL 驗證失敗。
+錯誤訊息：`SSL: CERTIFICATE_VERIFY_FAILED - self signed certificate in certificate chain`
+
+**解法（部署腳本已自動處理）：**
+
+```bash
+# Conda：關閉 SSL 驗證
+conda config --set ssl_verify false
+
+# pip：加 --trusted-host
+pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org <package>
+
+# curl：加 -k
+curl -k <url>
+```
+
+> 自動部署腳本 `deploy-linux.sh` 已內建以上處理，直接跑即可。
+
 ## 安裝步驟
 
 ### 1. 環境檢查
@@ -34,9 +54,12 @@ for i in 1 2 3 4 5; do curl -s https://api.ipify.org; echo; done
 Ubuntu 20.04+ 如已有 Python 3.11 可跳過此步驟。
 
 ```bash
-# 安裝 Miniconda
-curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o /tmp/miniconda.sh
+# 安裝 Miniconda（-k 跳過 SSL inspection）
+curl -fsSLk https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o /tmp/miniconda.sh
 bash /tmp/miniconda.sh -b -p /opt/miniconda3
+
+# 關閉 SSL 驗證（校園 SSL inspection 環境必須）
+/opt/miniconda3/bin/conda config --set ssl_verify false
 
 # 接受 TOS（2025+ 新版 Conda 必須）
 /opt/miniconda3/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
@@ -95,8 +118,11 @@ cd bookstore-scraper
 # 建立 venv（用 Conda 的 Python 3.11）
 /opt/miniconda3/envs/scraper/bin/python -m venv .venv
 
+# 先升級 pip（舊版不支援 pyproject.toml editable mode）
+.venv/bin/pip install --upgrade pip --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org
+
 # 安裝（含 undetected-chromedriver）
-.venv/bin/pip install -e ".[undetected]"
+.venv/bin/pip install -e ".[undetected]" --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org
 ```
 
 ### 6. 設定
