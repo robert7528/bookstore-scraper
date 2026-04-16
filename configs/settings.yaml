@@ -14,7 +14,7 @@ scraper:
 
 session:
   # Session 閒置自動過期時間 (秒)
-  ttl: 300
+  ttl: 1800
 
 browser:
   # 瀏覽器引擎: "playwright" (Playwright), "undetected" (undetected-chromedriver, 可過 Turnstile)
