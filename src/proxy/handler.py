@@ -35,22 +35,34 @@ STRIP_RESPONSE_HEADERS = frozenset({
 })
 
 
-def _is_cf_cookie(set_cookie_value: str) -> bool:
-    """Check if a Set-Cookie header is a Cloudflare cookie."""
+# Cookies managed by HyPass — kept in curl_cffi session, not forwarded to HyProxy.
+# Loaded from settings.yaml; defaults cover CF + Clarivate auth cookies.
+_managed_cookie_names: set[str] = set()
+
+def _load_managed_cookies():
+    global _managed_cookie_names
+    names = cfg("proxy.managed_cookies", ["__cf_bm", "cf_clearance", "PSSID", "IC2_SID"])
+    _managed_cookie_names = {n.lower() for n in names}
+
+_load_managed_cookies()
+
+
+def _is_managed_cookie(set_cookie_value: str) -> bool:
+    """Check if a Set-Cookie header is a HyPass-managed cookie."""
     name = set_cookie_value.split("=", 1)[0].strip().lower()
-    return name.startswith("__cf") or name == "cf_clearance"
+    return name in _managed_cookie_names
 
 
 async def _curl_request(session_mgr: SessionManager, sid: str, method: str, url: str, headers: dict, body: bytes):
     """Execute curl request, retry once with fresh session if session was closed."""
     for attempt in range(2):
         session = session_mgr.get_or_create(sid)
-        # Clear non-CF cookies — HyProxy/browser manages those via headers.
-        # Keep CF cookies (__cf_bm, cf_clearance) in session so curl_cffi
+        # Clear non-managed cookies — HyProxy/browser manages those via headers.
+        # Keep managed cookies (CF + Clarivate auth) in session so curl_cffi
         # handles them directly, preventing HyProxy cookie-domain rewrite
-        # from merging different sites' CF tokens and causing conflicts.
+        # from merging different sites' cookies and causing conflicts.
         for name in list(session.cookies.keys()):
-            if not name.startswith("__cf") and not name.startswith("cf_clearance"):
+            if name.lower() not in _managed_cookie_names:
                 session.cookies.delete(name)
 
         kwargs = {"headers": headers or None, "allow_redirects": False}
@@ -184,17 +196,17 @@ async def handle_proxy_request(
             )
             logger.info("Patched access.clarivate.com Angular domain detection for %s", url[:80])
 
-        # Remove hop-by-hop, stale encoding headers, and CF cookies from response.
-        # CF cookies (__cf_bm, cf_clearance) are managed by curl_cffi session
+        # Remove hop-by-hop, stale encoding headers, and managed cookies from response.
+        # Managed cookies (CF + Clarivate auth) are kept in curl_cffi session
         # and must NOT be forwarded to HyProxy — its cookie-domain rewrite
-        # merges them across sites, causing Cloudflare token conflicts.
+        # merges them across sites, causing cookie conflicts.
         filtered = []
         for k, v in resp_header_list:
             if k.lower() in HOP_BY_HOP or k.lower() in STRIP_RESPONSE_HEADERS:
                 continue
-            if k.lower() == "set-cookie" and _is_cf_cookie(v):
+            if k.lower() == "set-cookie" and _is_managed_cookie(v):
                 cookie_name = v.split("=", 1)[0].strip()
-                logger.info("CF cookie filtered: %s from %s", cookie_name, url[:80])
+                logger.info("Managed cookie filtered: %s from %s", cookie_name, url[:80])
                 continue
             filtered.append((k, v))
         resp_header_list = filtered

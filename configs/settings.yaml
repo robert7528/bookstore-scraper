@@ -55,3 +55,12 @@ proxy:
   # 預設所有 CONNECT 都走 MitM + curl_cffi（繞過 CF TLS 偵測）
   # 只有這裡列的 domain 走透明轉發（適用於 MitM 會造成問題的 domain）
   transparent_domains: []
+  # HyPass 管理的 cookie（留在 curl_cffi session，不回傳給 HyProxy）
+  # 防止 HyProxy cookie-domain 改寫導致不同站台的 cookie 互相覆蓋
+  # CF cookie: __cf_bm, cf_clearance（綁定 TLS fingerprint，傳給瀏覽器也沒用）
+  # Clarivate auth cookie: PSSID, IC2_SID（IP 認證 session，共用 OK）
+  managed_cookies:
+    - "__cf_bm"
+    - "cf_clearance"
+    - "PSSID"
+    - "IC2_SID"
