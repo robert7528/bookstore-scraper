@@ -16,12 +16,21 @@ else
 fi
 
 LOGS=$(journalctl -u bookstore-scraper --since "1 hour ago" --no-pager 2>/dev/null)
-CF_FILTERED=$(echo "$LOGS" | grep -c "CF cookie filtered")
+CF_FILTERED=$(echo "$LOGS" | grep -c "Managed cookie filtered: __cf_bm\|Managed cookie filtered: cf_clearance\|CF cookie filtered")
+PSSID_FILTERED=$(echo "$LOGS" | grep -c "Managed cookie filtered: PSSID\|Managed cookie filtered: IC2_SID")
 JS_PATCHED=$(echo "$LOGS" | grep -c "Patched")
 JCR_200=$(echo "$LOGS" | grep "session-details" | grep -c "200")
 JCR_500=$(echo "$LOGS" | grep "session-details" | grep -c "500")
 ERRORS=$(echo "$LOGS" | grep "ERROR" | grep -v "Task was destroyed but it is pending" | grep -c "ERROR")
 
-echo "$DATE | status=$STATUS mem=$MEM | CF_filtered=$CF_FILTERED JS_patched=$JS_PATCHED JCR_200=$JCR_200 JCR_500=$JCR_500 errors=$ERRORS" >> $LOGFILE
+# Check HyProxy log for sessionExpired (today's log)
+HYPROXY_LOG="/hyproxy/logs/hyproxy.log.$(date '+%Y%m%d')"
+if [ -f "$HYPROXY_LOG" ]; then
+    SESSION_EXPIRED=$(grep -c "sessionExpired" "$HYPROXY_LOG" 2>/dev/null)
+else
+    SESSION_EXPIRED="-"
+fi
+
+echo "$DATE | status=$STATUS mem=$MEM | CF_filtered=$CF_FILTERED PSSID_filtered=$PSSID_FILTERED JS_patched=$JS_PATCHED JCR_200=$JCR_200 JCR_500=$JCR_500 errors=$ERRORS sessionExpired=$SESSION_EXPIRED" >> $LOGFILE
 [ "$STATUS" != "running" ] && echo "$DATE | ALERT: service not running!" >> $LOGFILE
 find $LOGDIR -name "proxy_monitor.*.log" -mtime +90 -delete 2>/dev/null
