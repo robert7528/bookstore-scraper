@@ -230,11 +230,24 @@ $APP_DIR/tools/monitor_proxy.sh 2>/dev/null && info "Proxy monitor OK" || true
 
 echo ""
 echo "=== [9/9] Verify ==="
-HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8101/ 2>/dev/null)
-info "Fetch API: HTTP $HEALTH"
+
+# Retry fetch API up to 15s (uvicorn startup takes longer than service active)
+HEALTH="000"
+for i in 1 2 3 4 5 6 7 8; do
+    HEALTH=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:8101/ 2>/dev/null || echo "000")
+    [ "$HEALTH" = "200" ] && break
+    sleep 2
+done
+
+if [ "$HEALTH" = "200" ]; then
+    info "Fetch API: HTTP 200"
+else
+    warn "Fetch API: HTTP $HEALTH (check: journalctl -u $SERVICE_NAME -n 30)"
+fi
 
 if $ENABLE_PROXY; then
-    PROXY=$(ss -tlnp | grep 8102 | wc -l)
+    # ss + grep with pipefail tolerance
+    PROXY=$(ss -tlnp 2>/dev/null | awk '$4 ~ /:8102$/' | wc -l || echo 0)
     if [ "$PROXY" -gt 0 ]; then
         info "Proxy 8102: listening"
     else
