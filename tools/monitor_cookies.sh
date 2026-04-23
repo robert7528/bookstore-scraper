@@ -7,7 +7,8 @@ LOGDIR=/opt/bookstore-scraper/logs
 LOGFILE=$LOGDIR/cookie_monitor.$(date '+%Y%m').log
 mkdir -p $LOGDIR
 
-DB_SIZE=$(redis-cli -n 9 DBSIZE | awk '{print $2}')
+# redis-cli DBSIZE 不同版本輸出「(integer) N」或單獨「N」，用 grep 抓純數字
+DB_SIZE=$(redis-cli -n 9 DBSIZE 2>/dev/null | grep -oE '[0-9]+' | head -1)
 JCR_KEYS=$(redis-cli -n 9 keys "*jcr*" 2>/dev/null | wc -l)
 
 CF_COOKIE=0
