@@ -15,7 +15,8 @@ PSSID_COOKIE=0
 SESSIONS=$(redis-cli -n 9 keys "session_*" 2>/dev/null)
 if [ -n "$SESSIONS" ]; then
     for k in $SESSIONS; do
-        VAL=$(redis-cli -n 9 get "$k" 2>/dev/null)
+        # tr -d '\0': HyProxy session 存 binary，bash 變數不能含 null byte，先濾掉避免 warning
+        VAL=$(redis-cli -n 9 get "$k" 2>/dev/null | tr -d '\0')
         echo "$VAL" | grep -q "__cf_bm" && CF_COOKIE=$((CF_COOKIE+1))
         echo "$VAL" | grep -q "PSSID" && PSSID_COOKIE=$((PSSID_COOKIE+1))
     done
