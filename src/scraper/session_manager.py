@@ -62,15 +62,22 @@ class SessionManager:
             for sid, (_, ts) in self._sessions.items()
         ]
 
-    def list_sessions_with_cookies(self) -> list[dict]:
-        """列出所有 session 及其 cookie 內容。"""
+    def list_sessions_with_cookies(self, full: bool = False) -> list[dict]:
+        """列出所有 session 及其 cookie 內容。
+
+        full=False（預設）: 長值截成 60 字 + '...'，避免日常 debug 輸出太長
+        full=True: 完整值，用於 curl 直接測試 Clarivate API
+        """
         now = time.time()
         result = []
         for sid, (session, ts) in self._sessions.items():
             cookies = {}
             for cookie in session.cookies.jar:
+                val = cookie.value
+                if not full and len(val) > 60:
+                    val = val[:60] + "..."
                 cookies[cookie.name] = {
-                    "value": cookie.value[:60] + "..." if len(cookie.value) > 60 else cookie.value,
+                    "value": val,
                     "domain": cookie.domain,
                     "path": cookie.path,
                 }

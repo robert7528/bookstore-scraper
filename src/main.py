@@ -307,9 +307,13 @@ async def list_sessions():
 
 
 @app.get("/sessions/cookies")
-async def list_sessions_cookies():
-    """列出所有活躍 session 及其 cookie 內容（debug 用）。"""
-    return {"sessions": session_mgr.list_sessions_with_cookies()}
+async def list_sessions_cookies(full: int = 0):
+    """列出所有活躍 session 及其 cookie 內容（debug 用）。
+
+    ?full=1 顯示完整 cookie 值（預設截 60 字）。
+    完整值用於直接 curl 測試 Clarivate API 時。
+    """
+    return {"sessions": session_mgr.list_sessions_with_cookies(full=bool(full))}
 
 
 # --- Existing endpoints ---
