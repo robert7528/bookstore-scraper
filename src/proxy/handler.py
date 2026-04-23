@@ -27,7 +27,10 @@ _asset_cache_max_bytes = 100 * 1024 * 1024  # 100MB hard cap
 _asset_cache_current_bytes = 0
 
 
-_HASHED_ASSET_RE = re.compile(r"/static/[^/]+\.[0-9a-f]{16,}\.(js|css)\b")
+# Match "{name}.{16+ hex}.{js|css}" anywhere in path — Angular/webpack
+# content-hashed filename convention. Path prefix varies across apps
+# (e.g. /static/, /public/, /jcr/static/).
+_HASHED_ASSET_RE = re.compile(r"/[^/]+\.[0-9a-f]{16,}\.(js|css)(?:$|[?#])")
 
 
 def _is_hashed_asset(url: str, content_type: str) -> bool:
