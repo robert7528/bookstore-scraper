@@ -65,8 +65,16 @@ proxy:
     - "PSSID"
     - "IC2_SID"
   # 直接丟棄的 telemetry/analytics domain，proxy 收到請求直接回 204 不連線
-  # 符合規則：完全相等 或 以 ".xxx" 結尾 或 含 ".xxx." 子字串
-  # Clarivate snowplow staging tracker timeout 30s、髒 log
+  # 使用 shell glob 比對 (fnmatch)：
+  #   "foo.com"    完整相等
+  #   "*.foo.com"  任何 *.foo.com 子網域
+  #   "foo-*"      任何 foo- 開頭
+  #   "*pendo*"    含 pendo 子字串
   block_domains:
-    - "snowplow-collector.staging.userintel.dev.sp.aws.clarivate.net"
-    - ".snowplow-collector."
+    # === 預設擋（死鏈 / 純 telemetry，無副作用）===
+    - "*snowplow-collector*"
+    # === 建議擋（Pendo 產品分析，擋掉省 5-10 秒 JS 處理）===
+    # 副作用：JCR/WoS 的 onboarding 氣泡、功能公告、NPS 調查不會出現
+    # 如果使用者反映想要這些提示，把下面 3 行拿掉 restart 即恢復
+    - "*pendo.webofscience.com"
+    - "pendo-static-*"

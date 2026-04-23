@@ -1,6 +1,7 @@
 """Forward proxy request handler — execute requests via curl_cffi."""
 from __future__ import annotations
 
+import fnmatch
 import logging
 import re
 from urllib.parse import urlparse
@@ -57,17 +58,18 @@ _load_block_domains()
 
 
 def _is_blocked_domain(domain: str) -> bool:
+    """Match settings.yaml proxy.block_domains patterns against domain.
+
+    Uses shell-style glob patterns (fnmatch):
+      "foo.com"      = exact match
+      "*.foo.com"    = match any *.foo.com subdomain
+      "foo-*"        = match anything starting with "foo-"
+      "*pendo*"      = match anything containing "pendo"
+    """
     d = domain.lower()
     for p in _block_domain_patterns:
-        if p.startswith(".") and p.endswith("."):
-            if p[1:-1] in d:
-                return True
-        elif p.startswith("."):
-            if d.endswith(p):
-                return True
-        else:
-            if d == p:
-                return True
+        if fnmatch.fnmatch(d, p):
+            return True
     return False
 
 
