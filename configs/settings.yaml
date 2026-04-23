@@ -64,3 +64,9 @@ proxy:
     - "cf_clearance"
     - "PSSID"
     - "IC2_SID"
+  # 直接丟棄的 telemetry/analytics domain，proxy 收到請求直接回 204 不連線
+  # 符合規則：完全相等 或 以 ".xxx" 結尾 或 含 ".xxx." 子字串
+  # Clarivate snowplow staging tracker timeout 30s、髒 log
+  block_domains:
+    - "snowplow-collector.staging.userintel.dev.sp.aws.clarivate.net"
+    - ".snowplow-collector."

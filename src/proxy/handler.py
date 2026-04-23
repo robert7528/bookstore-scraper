@@ -18,6 +18,37 @@ _browser_fetch_enabled = cfg("proxy.browser_fetch", False)
 
 logger = logging.getLogger(__name__)
 
+# Domains to block at proxy layer (return 204 immediately, no network call).
+# Covers analytics/telemetry endpoints that hang or timeout and pollute logs.
+_block_domain_patterns: list[str] = []
+
+def _load_block_domains():
+    global _block_domain_patterns
+    _block_domain_patterns = [
+        p.lower() for p in cfg("proxy.block_domains", [
+            "snowplow-collector.staging.userintel.dev.sp.aws.clarivate.net",
+            ".snowplow-collector.",
+        ])
+    ]
+
+_load_block_domains()
+
+
+def _is_blocked_domain(domain: str) -> bool:
+    d = domain.lower()
+    for p in _block_domain_patterns:
+        if p.startswith(".") and p.endswith("."):
+            if p[1:-1] in d:
+                return True
+        elif p.startswith("."):
+            if d.endswith(p):
+                return True
+        else:
+            if d == p:
+                return True
+    return False
+
+
 # Headers that should not be forwarded between proxy hops
 HOP_BY_HOP = frozenset({
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -118,6 +149,12 @@ async def handle_proxy_request(
     parsed = urlparse(url)
     domain = parsed.netloc or "unknown"
     sid = f"proxy_{domain}"
+
+    # Block useless telemetry/analytics endpoints that hang and pollute logs.
+    # Return 204 No Content immediately — no network call, no 30s timeout.
+    if _is_blocked_domain(domain):
+        logger.info("PROXY %s %s → 204 (blocked domain)", method, url[:80])
+        return 204, [], b""
 
     # Rate limit (proxy uses its own interval, default 0 = no limit)
     wait_time = await proxy_rate_limiter.wait(url)
