@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from urllib.parse import urlparse
 
 from ..config.settings import get as cfg
@@ -17,6 +18,24 @@ proxy_rate_limiter = DomainRateLimiter(_proxy_rate_interval)
 _browser_fetch_enabled = cfg("proxy.browser_fetch", False)
 
 logger = logging.getLogger(__name__)
+
+# In-memory cache for content-hashed static assets (Angular bundles etc.).
+# URL has content hash → URL change = content change, safe to cache forever
+# until service restart. Drops first-user 12s pain for subsequent users.
+_asset_cache: dict[str, tuple[int, list[tuple[str, str]], bytes]] = {}
+_asset_cache_max_bytes = 100 * 1024 * 1024  # 100MB hard cap
+_asset_cache_current_bytes = 0
+
+
+_HASHED_ASSET_RE = re.compile(r"/static/[^/]+\.[0-9a-f]{16,}\.(js|css)\b")
+
+
+def _is_hashed_asset(url: str, content_type: str) -> bool:
+    """Cacheable if JS/CSS with content-hash filename (Angular/webpack pattern)."""
+    if "javascript" not in content_type and "css" not in content_type:
+        return False
+    return bool(_HASHED_ASSET_RE.search(url))
+
 
 # Domains to block at proxy layer (return 204 immediately, no network call).
 # Covers analytics/telemetry endpoints that hang or timeout and pollute logs.
@@ -156,6 +175,12 @@ async def handle_proxy_request(
         logger.info("PROXY %s %s → 204 (blocked domain)", method, url[:80])
         return 204, [], b""
 
+    # Cached content-hashed static asset hit — skip network + patching.
+    if method.upper() == "GET" and url in _asset_cache:
+        cached_status, cached_headers, cached_body = _asset_cache[url]
+        logger.info("PROXY GET %s → %d (%d bytes) cache hit", url[:80], cached_status, len(cached_body))
+        return cached_status, cached_headers, cached_body
+
     # Rate limit (proxy uses its own interval, default 0 = no limit)
     wait_time = await proxy_rate_limiter.wait(url)
     if wait_time > 0:
@@ -247,6 +272,20 @@ async def handle_proxy_request(
                 continue
             filtered.append((k, v))
         resp_header_list = filtered
+
+        # Cache content-hashed static assets for next request.
+        # Content-hashed URL → safe to cache until service restart.
+        if (method.upper() == "GET"
+                and status_code == 200
+                and _is_hashed_asset(url, content_type)
+                and url not in _asset_cache):
+            global _asset_cache_current_bytes
+            size = len(resp_body)
+            if _asset_cache_current_bytes + size <= _asset_cache_max_bytes:
+                _asset_cache[url] = (status_code, resp_header_list, resp_body)
+                _asset_cache_current_bytes += size
+                logger.info("Asset cached: %s (%d bytes, total %d MB)",
+                            url[:80], size, _asset_cache_current_bytes // (1024*1024))
 
         logger.info("PROXY %s %s → %d (%d bytes)", method, url[:80], status_code, len(resp_body))
         return status_code, resp_header_list, resp_body
