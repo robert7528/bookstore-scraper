@@ -78,3 +78,13 @@ proxy:
     # 如果使用者反映想要這些提示，把下面 3 行拿掉 restart 即恢復
     - "*pendo.webofscience.com"
     - "pendo-static-*"
+
+  # 特定 URL 收到 500 時 HyPass 自動 retry 一次（不偽造內容，只是重發）
+  # 用途：Clarivate bwjournal/v1 meta API 偶爾 500，瀏覽器 Angular 未必
+  # 觸發 auth retry → cascade 導致空 list。HyPass 先幫 retry 爭取成功。
+  retry_on_500:
+    url_patterns:
+      - "*/api/jcr3/bwjournal/v1/session-details*"
+      - "*/api/jcr3/bwjournal/v1/product-details*"
+    max_attempts: 1    # 總共 retry 幾次（1 = 原始 1 次 + retry 1 次 = 共 2 次）
+    delay_ms: 500      # retry 前等幾毫秒

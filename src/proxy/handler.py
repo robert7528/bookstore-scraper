@@ -102,6 +102,36 @@ def _load_managed_cookies():
 _load_managed_cookies()
 
 
+# URL 命中這些 pattern 且回 500 時，HyPass 會透明 retry 一次（不偽造內容）。
+# 用途：Clarivate bwjournal/v1 meta API 偶爾 500 時，瀏覽器 Angular 未必觸發
+# auth retry，導致 cascade 空 list。HyPass 先幫 retry 一次爭取成功。
+# 參考 memory: project_jcr_empty_list_symptom.md
+_retry_on_500_patterns: list[str] = []
+_retry_on_500_attempts: int = 1
+_retry_on_500_delay_ms: int = 500
+
+def _load_retry_on_500():
+    global _retry_on_500_patterns, _retry_on_500_attempts, _retry_on_500_delay_ms
+    _retry_on_500_patterns = [
+        p.lower() for p in cfg("proxy.retry_on_500.url_patterns", [
+            "*/api/jcr3/bwjournal/v1/session-details*",
+            "*/api/jcr3/bwjournal/v1/product-details*",
+        ])
+    ]
+    _retry_on_500_attempts = int(cfg("proxy.retry_on_500.max_attempts", 1))
+    _retry_on_500_delay_ms = int(cfg("proxy.retry_on_500.delay_ms", 500))
+
+_load_retry_on_500()
+
+
+def _should_retry_on_500(url: str) -> bool:
+    u = url.lower()
+    for p in _retry_on_500_patterns:
+        if fnmatch.fnmatch(u, p):
+            return True
+    return False
+
+
 def _is_managed_cookie(set_cookie_value: str) -> bool:
     """Check if a Set-Cookie header is a HyPass-managed cookie."""
     name = set_cookie_value.split("=", 1)[0].strip().lower()
@@ -221,6 +251,26 @@ async def handle_proxy_request(
 
     try:
         r = await _curl_request(session_mgr, sid, method, url, clean_headers, body)
+
+        # Transparent retry on 500 for specific meta API URLs — mimics the
+        # auth retry that Angular SPA would normally do when session-details /
+        # product-details 500. Avoids cascade where 500 leads to empty list.
+        # See project_jcr_empty_list_symptom.md / project_jcr_500_baseline.md
+        if r.status_code == 500 and _should_retry_on_500(url):
+            import asyncio
+            for attempt in range(1, _retry_on_500_attempts + 1):
+                await asyncio.sleep(_retry_on_500_delay_ms / 1000)
+                logger.info("PROXY retry %s %s (attempt %d/%d)",
+                            method, url[:80], attempt, _retry_on_500_attempts)
+                r_retry = await _curl_request(session_mgr, sid, method, url, clean_headers, body)
+                if r_retry.status_code != 500:
+                    logger.info("PROXY retry %s %s → %d (recovered from 500)",
+                                method, url[:80], r_retry.status_code)
+                    r = r_retry
+                    break
+            else:
+                logger.info("PROXY retry %s %s → still 500 after %d attempts",
+                            method, url[:80], _retry_on_500_attempts)
 
         status_code = r.status_code
         # Use multi_items() to preserve duplicate headers (e.g. multiple Set-Cookie)
