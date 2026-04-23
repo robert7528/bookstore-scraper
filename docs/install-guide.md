@@ -240,14 +240,46 @@ location /fetch/ {
 
 **CF cookie 過濾**防止 HyProxy 的 cookie-domain 改寫導致不同站台的 CF token 互相覆蓋。
 
-## 更新部署
+## 更新部署（SOP）
+
+> ⚠️ `git checkout configs/settings.yaml` 是**丟棄**本機改動讓 pull 能過，不是保留。必須先看差異、pull 後再 sed 改回。
+
+### 當天第一次更新任一台客戶機 — 先看差異
 
 ```bash
 cd /opt/bookstore-scraper
-git checkout configs/settings.yaml   # 保護本地設定
-git pull
-systemctl restart bookstore-scraper
+git diff configs/settings.yaml     # 看本機改了哪些（enabled、TTL、cookies 等）
 ```
+
+把 diff 結果貼給維運/工程（或自己記下），**確認所有本地改動的 sed 寫法**後，才進行下面的完整更新。
+
+### 完整更新流程（六步）
+
+```bash
+cd /opt/bookstore-scraper
+git checkout configs/settings.yaml                                        # 1. 清本機改動，讓 pull 能過
+git pull                                                                  # 2. 拿新版
+sed -i 's/^  enabled: false/  enabled: true/' configs/settings.yaml       # 3. 改回 proxy enabled（依 diff 結果加其他 sed）
+grep -A1 '^proxy:' configs/settings.yaml | head -5                       # 4. 驗證設定改回來了
+ls -l tools/monitor_*.sh                                                  # 5. 驗證腳本 +x（commit a4daecd 後已入 repo）
+systemctl restart bookstore-scraper                                       # 6. 重啟服務
+```
+
+**第 3 步依 diff 結果可能還要加：**
+- `sed -i 's/ttl: 300/ttl: 1800/' configs/settings.yaml`（session.ttl）
+- 其他 transparent_domains、managed_cookies、impersonate 等 customization
+
+### 同一台當天第二次以後更新
+
+直接跑完整六步即可，不用再 diff（假設本機沒有再被手動改）。
+
+### 各站常見本地改動速查
+
+| 站 | 改動 |
+|----|----|
+| 雲科大 jumper、北科大、北醫大、isearch、hyint | `proxy.enabled: false → true` |
+| 所有有 proxy 的老部署 | `session.ttl: 300 → 1800`（04-16 後源頭已改） |
+| 依站客製 | `managed_cookies`、`transparent_domains`、`impersonate` |
 
 ## 監控設定
 
