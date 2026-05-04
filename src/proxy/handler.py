@@ -102,38 +102,54 @@ def _load_managed_cookies():
 _load_managed_cookies()
 
 
-# HyProxy 反向 hostname 改寫 — 修 Referer/Origin 從 libdb 子域名還原成原始域名。
-# 例：access-clarivate-com.libdb.yuntech.edu.tw → access.clarivate.com
-# 動機：Clarivate broker (login.incites.clarivate.com) 驗 Referer 必須是
-# access.clarivate.com 才發 PSSID；libdb 子域名 Referer 會被打回登入頁形成 loop。
+# HyProxy 反向 hostname 改寫 — 修 Referer/Origin 還原成原始域名。
+# Clarivate broker (login.incites.clarivate.com) 驗 Referer 必須是 access.clarivate.com
+# 才發 PSSID；hostname 不對會被打回登入頁形成 loop。
+#
+# 兩種 broken hostname 都需要 rewrite 回原始：
+# (a) HyProxy 完全沒解碼:  access-clarivate-com.libdb.yuntech.edu.tw:3001
+#     → 用 proxy_domain_suffixes 認 suffix，prefix dash 換 dot
+# (b) HyProxy 半解碼 bug:  access-clarivate.com / jcr-clarivate.com 等
+#     → 用 proxy_target_domains 認尾段，hostname 全 dash 換 dot
 _proxy_domain_suffixes: list[str] = []
+_proxy_target_domains: list[str] = []
 
-def _load_proxy_domain_suffixes():
-    global _proxy_domain_suffixes
-    raw = cfg("proxy.proxy_domain_suffixes", [])
-    _proxy_domain_suffixes = [s.lstrip(".").lower() for s in raw if s]
+def _load_proxy_rewrite_config():
+    global _proxy_domain_suffixes, _proxy_target_domains
+    suf = cfg("proxy.proxy_domain_suffixes", [])
+    _proxy_domain_suffixes = [s.lstrip(".").lower() for s in suf if s]
+    tgt = cfg("proxy.proxy_target_domains", [])
+    _proxy_target_domains = [s.lstrip(".").lower() for s in tgt if s]
 
-_load_proxy_domain_suffixes()
+_load_proxy_rewrite_config()
 
 
 def _decode_proxy_hostname(hostname: str) -> str | None:
-    """Reverse-decode a HyProxy-rewritten hostname back to the original domain.
+    """Try to restore an original domain from a HyProxy-rewritten hostname.
 
-    Returns None if hostname doesn't match any configured proxy suffix.
-    Example: access-clarivate-com.libdb.yuntech.edu.tw → access.clarivate.com
+    Handles two broken forms (returns None if neither matches):
+    (a) Full proxy form  access-clarivate-com.libdb.yuntech.edu.tw → access.clarivate.com
+    (b) Partial decode   access-clarivate.com → access.clarivate.com
     """
     h = hostname.lower()
+    # (a) full proxy form: strip libdb suffix, dash → dot in prefix
     for suffix in _proxy_domain_suffixes:
         if h.endswith("." + suffix):
             prefix = h[: -(len(suffix) + 1)]
             if prefix and "-" in prefix:
                 return prefix.replace("-", ".")
+    # (b) partial decode: dash → dot if result lands on a known target
+    if "-" in h and _proxy_target_domains:
+        decoded = h.replace("-", ".")
+        for target in _proxy_target_domains:
+            if decoded == target or decoded.endswith("." + target):
+                return decoded
     return None
 
 
 def _rewrite_url_host(url: str) -> str:
     """If the URL host is a HyProxy-rewritten one, restore the original.
-    Drops the proxy port (Clarivate uses default 443)."""
+    Drops the proxy port (origin uses default 443)."""
     try:
         parsed = urlparse(url)
     except Exception:
@@ -147,12 +163,12 @@ def _rewrite_url_host(url: str) -> str:
 
 
 def _rewrite_proxy_referer_origin(headers: dict) -> None:
-    """In-place rewrite Referer/Origin headers from libdb proxy host to original.
+    """In-place rewrite Referer/Origin headers from proxy host to original.
 
-    Clarivate broker checks Referer for whitelisted access.clarivate.com.
-    Without this rewrite, libdb subdomain Referer fails IP auth → login loop.
+    Without this rewrite, broken proxy hostname Referer fails IP auth at
+    upstream brokers (e.g. Clarivate) → login loop.
     """
-    if not _proxy_domain_suffixes:
+    if not _proxy_domain_suffixes and not _proxy_target_domains:
         return
     for key in list(headers):
         if key.lower() not in ("referer", "origin"):

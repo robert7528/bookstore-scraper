@@ -79,20 +79,31 @@ proxy:
     - "*pendo.webofscience.com"
     - "pendo-static-*"
 
-  # HyProxy libdb 子域名後綴 — 用於反向解碼 Referer/Origin header
-  # 瀏覽器在 libdb 子域名上發出的請求，Referer 是 libdb 域名（如
-  # access-clarivate-com.libdb.yuntech.edu.tw），但 Clarivate broker
-  # (login.incites.clarivate.com) 驗 Referer 必須是 access.clarivate.com，
-  # 否則拒發 PSSID 進 login loop。HyPass 在 forward 前把 Referer/Origin
-  # 反向解碼成原始域名（access-clarivate-com → access.clarivate.com）。
-  # 各客戶 suffix 不同，每台部署自行設定（雲科是 libdb.yuntech.edu.tw，
-  # 其他校區的 suffix 列在註解供參考）。空 list 不啟用 rewrite。
+  # HyProxy hostname 反向解碼 — 用於修 Referer/Origin header
+  # Clarivate broker 驗 Referer 必須是原始域名（如 access.clarivate.com），
+  # 否則拒發 PSSID 進 login loop。HyPass 在 forward 前還原 hostname。
+  #
+  # HyProxy 會送來兩種 broken hostname，兩種都要修：
+  # (a) 完全沒解碼:  access-clarivate-com.libdb.yuntech.edu.tw:3001
+  #     → 用 proxy_domain_suffixes 認尾段（libdb 後綴）
+  # (b) 半解碼 bug:  access-clarivate.com / jcr-clarivate.com 等
+  #     → 用 proxy_target_domains 認尾段（dash 換 dot 後的合法域名）
+  #
+  # 雲科實測 (2026-05-04) HyProxy 兩種 case 都會送，所以兩個都要設。
+  # 空 list 不啟用 rewrite。各客戶 suffix 不同，每台部署自行設定。
   proxy_domain_suffixes: []
     # - "libdb.yuntech.edu.tw"        # 雲林科技大學
     # - "search.lib.ntut.edu.tw"      # 北科大
     # - "jumper.tmu.edu.tw"           # 北醫大
     # - "isearch.tpml.edu.tw"         # 北市圖
     # - "hyint.utaipei.edu.tw"        # 北市大
+
+  # 反向解碼後要結尾於這些域名才視為合法 rewrite 目標
+  # （避免誤改別的 dash hostname 例如 my-app.example.com）
+  proxy_target_domains: []
+    # - "clarivate.com"               # JCR / WoS / InCites broker
+    # - "webofknowledge.com"
+    # - "webofscience.com"
 
   # 特定 URL 收到 500 時 HyPass 自動 retry 一次（不偽造內容，只是重發）
   # 用途：Clarivate bwjournal/v1 meta API 偶爾 500，瀏覽器 Angular 未必
