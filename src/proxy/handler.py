@@ -4,7 +4,7 @@ from __future__ import annotations
 import fnmatch
 import logging
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from ..config.settings import get as cfg
 from ..rate_limiter import DomainRateLimiter
@@ -100,6 +100,70 @@ def _load_managed_cookies():
     _managed_cookie_names = {n.lower() for n in names}
 
 _load_managed_cookies()
+
+
+# HyProxy 反向 hostname 改寫 — 修 Referer/Origin 從 libdb 子域名還原成原始域名。
+# 例：access-clarivate-com.libdb.yuntech.edu.tw → access.clarivate.com
+# 動機：Clarivate broker (login.incites.clarivate.com) 驗 Referer 必須是
+# access.clarivate.com 才發 PSSID；libdb 子域名 Referer 會被打回登入頁形成 loop。
+_proxy_domain_suffixes: list[str] = []
+
+def _load_proxy_domain_suffixes():
+    global _proxy_domain_suffixes
+    raw = cfg("proxy.proxy_domain_suffixes", [])
+    _proxy_domain_suffixes = [s.lstrip(".").lower() for s in raw if s]
+
+_load_proxy_domain_suffixes()
+
+
+def _decode_proxy_hostname(hostname: str) -> str | None:
+    """Reverse-decode a HyProxy-rewritten hostname back to the original domain.
+
+    Returns None if hostname doesn't match any configured proxy suffix.
+    Example: access-clarivate-com.libdb.yuntech.edu.tw → access.clarivate.com
+    """
+    h = hostname.lower()
+    for suffix in _proxy_domain_suffixes:
+        if h.endswith("." + suffix):
+            prefix = h[: -(len(suffix) + 1)]
+            if prefix and "-" in prefix:
+                return prefix.replace("-", ".")
+    return None
+
+
+def _rewrite_url_host(url: str) -> str:
+    """If the URL host is a HyProxy-rewritten one, restore the original.
+    Drops the proxy port (Clarivate uses default 443)."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return url
+    if not parsed.hostname:
+        return url
+    decoded = _decode_proxy_hostname(parsed.hostname)
+    if decoded is None:
+        return url
+    return urlunparse(parsed._replace(netloc=decoded))
+
+
+def _rewrite_proxy_referer_origin(headers: dict) -> None:
+    """In-place rewrite Referer/Origin headers from libdb proxy host to original.
+
+    Clarivate broker checks Referer for whitelisted access.clarivate.com.
+    Without this rewrite, libdb subdomain Referer fails IP auth → login loop.
+    """
+    if not _proxy_domain_suffixes:
+        return
+    for key in list(headers):
+        if key.lower() not in ("referer", "origin"):
+            continue
+        old = headers[key]
+        if not old:
+            continue
+        new = _rewrite_url_host(old)
+        if new != old:
+            headers[key] = new
+            logger.info("Rewrote %s: %s → %s", key, old[:80], new[:80])
 
 
 # URL 命中這些 pattern 且回 500 時，HyPass 會透明 retry 一次（不偽造內容）。
@@ -229,6 +293,11 @@ async def handle_proxy_request(
     # Remove accept-encoding — let curl_cffi handle its own encoding negotiation
     clean_headers.pop("accept-encoding", None)
     clean_headers.pop("Accept-Encoding", None)
+
+    # Rewrite Referer/Origin from HyProxy libdb host back to original domain.
+    # Required because some upstreams (Clarivate broker) check Referer ==
+    # whitelisted domain — libdb subdomain Referer fails IP auth → login loop.
+    _rewrite_proxy_referer_origin(clean_headers)
 
     # JCR API via browser fetch (NAT pool workaround, off by default)
     if _needs_browser_fetch(domain, url):
