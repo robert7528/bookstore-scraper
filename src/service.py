@@ -1,7 +1,7 @@
 """Cross-platform service management for bookstore-scraper.
 
 Provides install/uninstall/start/stop/status commands that work on both
-Linux (systemd) and Windows (Windows Service via pywin32).
+Linux (systemd) and Windows (Windows Service via WinSW wrapper).
 
 Usage:
     python -m src.cli service install
