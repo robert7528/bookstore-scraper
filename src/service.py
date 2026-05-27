@@ -79,6 +79,7 @@ def _build_exec_start(python: str) -> str:
 
 
 def _linux_install():
+    """Install and enable the service."""
     app_dir = _get_app_dir()
     python = _get_python()
     exec_start = _build_exec_start(python)
@@ -97,6 +98,7 @@ def _linux_install():
 
 
 def _linux_uninstall():
+    """Stop, disable, and remove the service."""
     subprocess.run(["systemctl", "stop", SERVICE_NAME], check=False)
     subprocess.run(["systemctl", "disable", SERVICE_NAME], check=False)
     if os.path.exists(SYSTEMD_PATH):
@@ -106,16 +108,19 @@ def _linux_uninstall():
 
 
 def _linux_start():
+    """Start the service."""
     subprocess.run(["systemctl", "start", SERVICE_NAME], check=True)
     print("Service started.")
 
 
 def _linux_stop():
+    """Stop the service."""
     subprocess.run(["systemctl", "stop", SERVICE_NAME], check=True)
     print("Service stopped.")
 
 
 def _linux_status():
+    """Show service status."""
     subprocess.run(["systemctl", "status", SERVICE_NAME, "--no-pager"], check=False)
 
 
@@ -165,6 +170,7 @@ def _win_ensure_xml():
 
 
 def _win_install():
+    """Install and enable the service."""
     winsw = _win_get_winsw()
     _win_ensure_xml()
     subprocess.run([str(winsw), "install"], check=True, cwd=str(winsw.parent))
@@ -172,6 +178,7 @@ def _win_install():
 
 
 def _win_uninstall():
+    """Stop, disable, and remove the service."""
     winsw = _win_get_winsw()
     subprocess.run([str(winsw), "stop"], check=False, cwd=str(winsw.parent))
     subprocess.run([str(winsw), "uninstall"], check=True, cwd=str(winsw.parent))
@@ -179,18 +186,21 @@ def _win_uninstall():
 
 
 def _win_start():
+    """Start the service."""
     winsw = _win_get_winsw()
     subprocess.run([str(winsw), "start"], check=True, cwd=str(winsw.parent))
     print("Service started.")
 
 
 def _win_stop():
+    """Stop the service."""
     winsw = _win_get_winsw()
     subprocess.run([str(winsw), "stop"], check=True, cwd=str(winsw.parent))
     print("Service stopped.")
 
 
 def _win_status():
+    """Show service status."""
     winsw = _win_get_winsw()
     subprocess.run([str(winsw), "status"], check=False, cwd=str(winsw.parent))
 
