@@ -150,9 +150,16 @@ Write-Host ""
 Write-Host "=== [8/8] Verify ==="
 try {
     $health = Invoke-WebRequest -Uri "http://127.0.0.1:8101/" -UseBasicParsing -TimeoutSec 5
-    Write-Info "Fetch API: HTTP $($health.StatusCode)"
+    Write-Info "Fetch API: HTTP $($health.StatusCode) (listening)"
 } catch {
-    Write-Info "Fetch API: HTTP 404 (OK - service running)"
+    if ($_.Exception.Response) {
+        # Got an HTTP response (e.g. 404 on /) -> service is up and serving
+        Write-Info "Fetch API: HTTP $([int]$_.Exception.Response.StatusCode) (listening)"
+    } else {
+        # Connection refused / timeout -> service is NOT actually up
+        Write-Warn "Fetch API: NOT responding on 8101 - check service status / logs"
+        Write-Warn "  $($_.Exception.Message)"
+    }
 }
 
 if ($Proxy) {
