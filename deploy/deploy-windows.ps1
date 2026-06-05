@@ -70,7 +70,9 @@ Write-Host ""
 Write-Host "=== [2/8] Clone or update ==="
 if (Test-Path "$AppDir\.git") {
     Set-Location $AppDir
-    git checkout configs/settings.yaml 2>$null
+    # git 會把 "Updated 0 paths from the index" 印到 stderr，在 ErrorActionPreference=Stop +
+    # 2>$null 重導向下 PS 5.1 會包成 NativeCommandError 觸發 trap，故改用 cmd 自行吞掉 stderr。
+    cmd /c "git checkout configs/settings.yaml >nul 2>nul"
     git pull
     Write-Info "Updated: $AppDir"
 } else {
