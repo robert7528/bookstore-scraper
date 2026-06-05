@@ -126,7 +126,9 @@ def _linux_status():
 
 # ─── Windows (WinSW) ────────────────────────────────────────────────────────
 
-WINSW_URL = "https://github.com/winsw/winsw/releases/download/v3.0.0-alpha.11/WinSW-net461.exe"
+# Stable v2.12.0 (.NET Framework 4.x build, built into Windows). v3 alpha hangs in
+# service mode (logs "Starting WinSW in service mode" then SCM times out → 1053).
+WINSW_URL = "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET4.exe"
 
 
 def _win_get_winsw() -> Path:
