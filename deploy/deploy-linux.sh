@@ -216,7 +216,10 @@ echo "=== [8/9] Setup monitoring ==="
 mkdir -p $APP_DIR/logs
 chmod +x $APP_DIR/tools/monitor_cookies.sh $APP_DIR/tools/monitor_proxy.sh 2>/dev/null || true
 
-(crontab -l 2>/dev/null | grep -v "monitor_cookies" | grep -v "monitor_proxy"; \
+# NOTE: fresh machine has no crontab → `crontab -l` exits 1 and the grep chain
+# returns 1 on empty input; under `set -euo pipefail` that aborts the whole
+# script mid-[8/9] (skipping the echo lines and [9/9]). `|| true` keeps it alive.
+(crontab -l 2>/dev/null | grep -v "monitor_cookies" | grep -v "monitor_proxy" || true; \
  echo "0 * * * * $APP_DIR/tools/monitor_cookies.sh"; \
  echo "0 * * * * $APP_DIR/tools/monitor_proxy.sh") | crontab -
 
