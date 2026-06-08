@@ -54,6 +54,15 @@ class UndetectedBrowser(BaseScraper):
                     logger.warning("Chrome driver lost, restarting")
                     self._driver = None
 
+        # 校園 SSL inspection(例:北科 NTUT)會插自簽 CA。UC 的 patcher 用
+        # urllib.request.urlopen 抓 chromedriver 版本 / 下載 driver
+        # (patcher.fetch_release_number），預設驗系統信任鏈 → 自簽 CA 下死在
+        # CERTIFICATE_VERIFY_FAILED，browser fallback 根本起不來。curl_cffi 那層
+        # 早就 verify=False;這裡讓 patcher 的 urllib 同樣不驗,fallback 才能啟動。
+        # 本服務刻意不驗上游 TLS(anti-bot fetch),全程一致。
+        import ssl
+        ssl._create_default_https_context = ssl._create_unverified_context
+
         import undetected_chromedriver as uc
 
         options = uc.ChromeOptions()
