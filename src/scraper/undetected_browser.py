@@ -71,6 +71,10 @@ class UndetectedBrowser(BaseScraper):
         options.add_argument("--disable-gpu")
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--lang=zh-TW")
+        # 校園透明 SSL inspection(例:北科對外網路)會把原站憑證即時換成校內私有
+        # CA 簽的憑證。內部瀏覽器抓 origin 時別因此被擋 —— 跟 curl_cffi verify=False
+        # 同立場,本服務刻意不驗上游 TLS。不依賴「主機剛好信任那張私有 CA」。
+        options.add_argument("--ignore-certificate-errors")
 
         headless = cfg("browser.headless", True)
         if headless:
