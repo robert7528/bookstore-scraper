@@ -28,6 +28,15 @@ HyPass (bookstore-scraper) 離線安裝包
    .venv\Scripts\python -m src.cli service start
    .venv\Scripts\python -m src.cli service stop
 
+移除 / 重裝
+-----------
+   以「系統管理員」雙擊  uninstall-offline.bat
+   (停服務 → 移除服務 → 刪 .venv / logs / WinSW;Python 預設保留,重裝會沿用)
+   要連 Python 一起移除(完整清除):
+       powershell -ExecutionPolicy Bypass -File .\uninstall-offline.ps1 -RemovePython
+   注意:移除請用這支,別只手動刪資料夾 —— 只刪資料夾會留下 Python 註冊殘留,
+         之後重裝可能被擋。
+
 注意事項
 --------
 - Server 2012 R2:Python 3.12 需要 UCRT。若安裝過程中 python 跑不起來、噴
@@ -41,6 +50,7 @@ HyPass (bookstore-scraper) 離線安裝包
 內容物
 ------
   install-offline.bat / install-offline.ps1   離線安裝腳本
+  uninstall-offline.bat / uninstall-offline.ps1 移除腳本
   offline\python-3.12.10-amd64.exe            Python 安裝檔
   offline\WinSW.NET4.exe                       服務包裝器
   offline\wheels\*.whl                         離線相依套件
