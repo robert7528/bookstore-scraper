@@ -10,3 +10,6 @@ logs/
 CLAUDE.md
 AI_Development_Report.md
 docs/private/
+offline/
+*.zip
+python/
