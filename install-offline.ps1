@@ -32,26 +32,30 @@ if (-not (Test-Path (Join-Path $Wheels '*.whl')))         { Write-Error "Offline
 if (-not (Test-Path (Join-Path $Offline 'WinSW.NET4.exe'))) { Write-Error "WinSW.NET4.exe not found in $Offline"; exit 1 }
 Info ("Offline assets OK (wheels: " + (Get-ChildItem $Wheels -Filter *.whl).Count + ")")
 
-# --- [2/7] Python 3.12 (prefer existing 3.12; else install bundled private) ---
-# Wheels are cp312-specific, so we need exactly 3.12. If the machine already has
-# a 3.12 (e.g. earlier deploy / system install), reuse it -- re-installing the
-# SAME bundled version to a new TargetDir is a no-op and would fail. Only install
-# the bundled Python when no 3.12 is present.
+# --- [2/7] Python 3.12 (prefer existing 3.12; else install bundled SYSTEM-WIDE) ---
+# Wheels are cp312-specific, so we need exactly 3.12. Prefer a 3.12 already on PATH.
+# Otherwise install the bundled Python SYSTEM-WIDE (same approach as the online
+# deploy) and reload PATH. We deliberately avoid a private per-user TargetDir:
+# a leftover same-version registration from a deleted folder blocks re-install and
+# is not on PATH, which breaks detection on the next run.
 Write-Host "`n=== [2/7] Python 3.12 ==="
-$BasePy = $null
-if (Get-Command python -ErrorAction SilentlyContinue) {
-    try { $v = (python -c "import sys;print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null) } catch { $v = "" }
-    if ($v -eq "3.12") { $BasePy = "python"; Info "Using existing Python 3.12 (in PATH)" }
-}
-if (-not $BasePy) {
-    if (-not (Test-Path $PyExe)) {
-        $pyInstaller = Join-Path $Offline "python-3.12.10-amd64.exe"
-        if (-not (Test-Path $pyInstaller)) { Write-Error "Bundled Python installer missing: $pyInstaller"; exit 1 }
-        Info "No Python 3.12 found. Installing bundled Python 3.12.10 into $PyHome ..."
-        Start-Process $pyInstaller -ArgumentList "/quiet TargetDir=`"$PyHome`" InstallAllUsers=0 PrependPath=0 Include_launcher=0 Include_test=0 Include_doc=0 AssociateFiles=0 Shortcuts=0 Include_pip=1" -Wait
+function _Find312 {
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        try { $v = (python -c "import sys;print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null) } catch { $v = "" }
+        if ($v -eq "3.12") { return "python" }
     }
-    if (-not (Test-Path $PyExe)) { Write-Error "Python install failed (missing $PyExe). If the machine already has a non-3.12 Python that conflicts, install Python 3.12 manually and re-run."; exit 1 }
-    $BasePy = $PyExe
+    return $null
+}
+$BasePy = _Find312
+if ($BasePy) { Info "Using existing Python 3.12 (in PATH)" }
+else {
+    $pyInstaller = Join-Path $Offline "python-3.12.10-amd64.exe"
+    if (-not (Test-Path $pyInstaller)) { Write-Error "Bundled Python installer missing: $pyInstaller"; exit 1 }
+    Info "No Python 3.12 found. Installing bundled Python 3.12.10 (system-wide) ..."
+    Start-Process $pyInstaller -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1 Include_test=0" -Wait
+    $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")
+    $BasePy = _Find312
+    if (-not $BasePy) { Write-Error "Python 3.12 not available after install. On Server 2012 R2 a missing UCRT (api-ms-win-crt-*.dll) can cause this; install KB2999226 / Windows Update then re-run."; exit 1 }
 }
 try { $pv = (& $BasePy --version 2>&1) } catch { $pv = "" }
 if ($pv -notmatch "Python 3\.12") {
